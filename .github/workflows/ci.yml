@@ -1,0 +1,339 @@
+name: CI
+
+# Validation et publication vivent dans le meme fichier a dessein: "needs" ne
+# traverse pas les fichiers de workflow. Tant qu'ils etaient separes, un push sur
+# main lancait les deux en parallele, et une release pouvait etre publiee alors
+# que les tests venaient d'echouer.
+#
+# La validation sur un push vers main n'est donc pas une redite de celle de la
+# pull request: c'est la condition de la publication.
+#
+#   push sur develop -> validation, puis prerelease "<manifest>-beta.N"
+#   push sur main    -> validation, puis release stable "<manifest>"
+#   pull request     -> validation seule
+#
+# --- Quand incrementer "version" dans manifest.json -------------------------
+#
+# JUSTE APRES la sortie d'une stable, sur develop, et non avant de fusionner
+# dans main. La raison est l'ordre des versions tel que le calcule
+# AwesomeVersion, la bibliotheque utilisee par Home Assistant et HACS:
+#
+#   1.0.0-beta.1  <  1.0.0     une prerelease se classe SOUS sa version
+#   1.0.1-beta.1  >  1.0.0
+#
+# Laisser le manifeste a 1.0.0 apres la sortie de v1.0.0 produirait donc des
+# beta classees plus anciennes que la stable deja installee: aucun testeur ne se
+# les verrait proposer. En incrementant des la sortie, les beta annoncent la
+# version vers laquelle elles vont et se classent au-dessus de la stable.
+#
+# Le cycle, en un coup d'oeil:
+#
+#   v1.0.0 sort  ->  manifeste passe a 1.0.1 (ou 1.1.0)  ->  push sur develop
+#   autant que voulu, chacun publiant 1.0.1-beta.N  ->  PR develop -> main
+#   ->  v1.0.1 sort avec le numero deja inscrit, rien a modifier.
+#
+# Changer d'avis en route est sans risque: passer de 1.0.1 a 1.1.0 fait
+# simplement repartir la numerotation des beta a beta.1.
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+# Une execution a la fois par branche. Deux fusions rapprochees lanceraient deux
+# publications concurrentes, qui liraient les memes tags et calculeraient le meme
+# numero de beta. L'annulation en vol est desactivee: interrompre une publication
+# a mi-chemin laisserait un tag sans release.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Une PR vers main doit venir de develop. GitHub n'offre aucun reglage natif
+  # pour restreindre la branche de base d'une PR, d'ou ce garde-fou.
+  #
+  # Le job tourne sans condition et decide a l'interieur, plutot que d'utiliser
+  # un "if" au niveau du job: un job saute ne rapporte pas de conclusion franche,
+  # ce qui rend son usage comme check obligatoire ambigu.
+  branch-flow:
+    name: Branch flow
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verifier la provenance d'une PR vers main
+        env:
+          # Les noms de branche passent par l'environnement et non par une
+          # interpolation dans le script: ils sont fournis par le contributeur.
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+          HEAD: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          THIS_REPO: ${{ github.repository }}
+        run: |
+          set -eu
+
+          if [ "${EVENT}" != "pull_request" ]; then
+            echo "Evenement ${EVENT}, rien a verifier."
+            exit 0
+          fi
+
+          if [ "${BASE}" != "main" ]; then
+            echo "PR vers ${BASE}: aucune contrainte de provenance."
+            exit 0
+          fi
+
+          if [ "${HEAD_REPO}" != "${THIS_REPO}" ]; then
+            echo "::error::Une PR vers main doit venir de la branche develop de" \
+                 "${THIS_REPO}, pas d'un fork (${HEAD_REPO}). Visez develop."
+            exit 1
+          fi
+
+          if [ "${HEAD}" != "develop" ]; then
+            echo "::error::Une PR vers main doit venir de develop, pas de" \
+                 "${HEAD}. Fusionnez d'abord dans develop."
+            exit 1
+          fi
+
+          echo "PR develop -> main : provenance conforme."
+
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Lint with flake8
+        run: |
+          flake8 custom_components/ --count --select=E9,F63,F7,F82 --show-source --statistics
+
+      - name: Check code formatting
+        run: |
+          black --check custom_components/
+
+      - name: Run tests
+        run: |
+          pytest tests/ -v
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+
+  hacs:
+    name: HACS Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: HACS validation
+        uses: hacs/action@main
+        with:
+          category: integration
+
+  hassfest:
+    name: Hassfest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Hassfest validation
+        uses: home-assistant/actions/hassfest@master
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    # La publication attend les quatre controles. C'est tout l'objet de la
+    # consolidation dans ce fichier.
+    needs: [branch-flow, validate, hacs, hassfest]
+    # Une pull request ne publie rien: seule la fusion, donc le push, le fait.
+    if: github.event_name == 'push'
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        run: |
+          set -euo pipefail
+          MANIFEST="custom_components/calendrier_scolaire_quebecois/manifest.json"
+
+          BASE=$(python3 -c \
+            "import json; print(json.load(open('${MANIFEST}'))['version'])")
+
+          if ! printf '%s' "${BASE}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::La version du manifeste doit etre X.Y.Z, lue: ${BASE}"
+            exit 1
+          fi
+
+          if [[ "${GITHUB_REF}" == refs/heads/main ]]; then
+            VERSION="${BASE}"
+            TAG="v${VERSION}"
+
+            # Un tag deja present signifie que le manifeste n'a pas ete
+            # incremente: publier une seconde fois la meme version ecraserait
+            # silencieusement la precedente.
+            if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+              echo "::error::Le tag ${TAG} existe deja. Incrementez \"version\"" \
+                   "dans ${MANIFEST} avant de fusionner dans main."
+              exit 1
+            fi
+
+            PRERELEASE=false
+            PREV=$(git tag --list 'v*' --sort=-version:refname \
+                   | grep -v -- '-' | head -1 || true)
+          else
+            # Numero de beta deduit des tags existants pour cette version de
+            # base, trie numeriquement: beta.10 doit suivre beta.9.
+            LAST=$(git tag --list "v${BASE}-beta.*" \
+                   | sed 's/.*beta\.//' | sort -n | tail -1 || true)
+            VERSION="${BASE}-beta.$(( ${LAST:-0} + 1 ))"
+            TAG="v${VERSION}"
+            PRERELEASE=true
+            PREV=$(git tag --list 'v*' --sort=-version:refname | head -1 || true)
+          fi
+
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "TAG_NAME=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "PRERELEASE=${PRERELEASE}" >> "$GITHUB_OUTPUT"
+          echo "PREV_TAG=${PREV}" >> "$GITHUB_OUTPUT"
+          echo "Version a publier: ${VERSION} (prerelease=${PRERELEASE})"
+
+      - name: Sync manifest version in the build
+        # Sur main c'est un no-op, la version lue etant deja la bonne. Sur
+        # develop, cela fait porter au zip le numero de beta, pour que Home
+        # Assistant rapporte la version reellement installee.
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+
+          path = pathlib.Path(
+              "custom_components/calendrier_scolaire_quebecois/manifest.json"
+          )
+          data = json.loads(path.read_text(encoding="utf-8"))
+          data["version"] = os.environ["VERSION"]
+          path.write_text(
+              json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+              encoding="utf-8",
+          )
+          PY
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+
+      - name: Build release archives
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+
+          # Archive destinee a HACS. Son nom est fixe, car il vient de la cle
+          # "filename" de hacs.json et ne peut pas porter la version. Son
+          # contenu est celui du dossier du composant, a la racine de l'archive:
+          # HACS fait un extractall direct dans
+          # config/custom_components/<domaine>/, sans retirer de prefixe.
+          ( cd custom_components/calendrier_scolaire_quebecois \
+            && zip -r "${GITHUB_WORKSPACE}/dist/calendrier_scolaire_quebecois.zip" . \
+                 -x '*__pycache__*' -x '*.pyc' )
+
+          # Archive destinee a l'installation manuelle, avec l'arborescence
+          # complete a recopier dans la configuration.
+          zip -r "dist/calendrier-scolaire-quebecois-${VERSION}.zip" \
+            custom_components/ \
+            hacs.json \
+            README.md \
+            LICENSE \
+            -x '*__pycache__*' -x '*.pyc'
+
+          echo "Contenu de l'archive HACS :"
+          unzip -l dist/calendrier_scolaire_quebecois.zip | head -20
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          set -euo pipefail
+          if [[ -z "${PREV_TAG}" ]]; then
+            COMMITS=$(git log --pretty=format:"%s" | head -30)
+          else
+            COMMITS=$(git log "${PREV_TAG}..HEAD" --pretty=format:"%s")
+          fi
+
+          FEATS="" FIXES="" CI="" DOCS="" CHORES="" OTHER=""
+          while IFS= read -r line; do
+            [[ -z "${line}" ]] && continue
+            case "${line}" in
+              feat*) FEATS="${FEATS}- ${line}\n" ;;
+              fix*)  FIXES="${FIXES}- ${line}\n" ;;
+              ci*)   CI="${CI}- ${line}\n" ;;
+              docs*) DOCS="${DOCS}- ${line}\n" ;;
+              chore*|refactor*|style*|perf*|test*) CHORES="${CHORES}- ${line}\n" ;;
+              *)     OTHER="${OTHER}- ${line}\n" ;;
+            esac
+          done <<< "${COMMITS}"
+
+          LOG=""
+          [[ -n "${FEATS}" ]]  && LOG="${LOG}## 🚀 Features\n${FEATS}\n"
+          [[ -n "${FIXES}" ]]  && LOG="${LOG}## 🐛 Bug Fixes\n${FIXES}\n"
+          [[ -n "${DOCS}" ]]   && LOG="${LOG}## 📝 Documentation\n${DOCS}\n"
+          [[ -n "${CI}" ]]     && LOG="${LOG}## 📦 CI/CD\n${CI}\n"
+          [[ -n "${CHORES}" ]] && LOG="${LOG}## 🧹 Chores\n${CHORES}\n"
+          [[ -n "${OTHER}" ]]  && LOG="${LOG}## 📌 Other\n${OTHER}\n"
+
+          {
+            echo "CHANGELOG<<CHANGELOG_EOF"
+            echo -e "${LOG}"
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          # Lien de comparaison: la plage reelle, et non une URL tronquee.
+          if [[ -z "${PREV_TAG}" ]]; then
+            echo "COMPARE_URL=${SERVER}/${REPO}/commits/${TAG_NAME}" \
+              >> "$GITHUB_OUTPUT"
+          else
+            echo "COMPARE_URL=${SERVER}/${REPO}/compare/${PREV_TAG}...${TAG_NAME}" \
+              >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          PREV_TAG: ${{ steps.version.outputs.PREV_TAG }}
+          TAG_NAME: ${{ steps.version.outputs.TAG_NAME }}
+          REPO: ${{ github.repository }}
+          SERVER: ${{ github.server_url }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.version.outputs.TAG_NAME }}
+          name: "Calendrier Scolaire Québécois ${{ steps.version.outputs.TAG_NAME }}"
+          body: |
+            ## What's Changed
+            ${{ steps.changelog.outputs.CHANGELOG }}
+
+            ## Installation
+
+            Via HACS, rien à télécharger : HACS récupère
+            `calendrier_scolaire_quebecois.zip` automatiquement.
+
+            Pour une installation manuelle, prenez
+            `calendrier-scolaire-quebecois-${{ steps.version.outputs.VERSION }}.zip`
+            et recopiez son dossier `custom_components/` dans votre
+            configuration Home Assistant.
+
+            **Full Changelog**: ${{ steps.changelog.outputs.COMPARE_URL }}
+          files: |
+            dist/calendrier_scolaire_quebecois.zip
+            dist/calendrier-scolaire-quebecois-${{ steps.version.outputs.VERSION }}.zip
+          draft: false
+          prerelease: ${{ steps.version.outputs.PRERELEASE == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

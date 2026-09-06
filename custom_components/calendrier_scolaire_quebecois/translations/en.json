@@ -1,0 +1,191 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Quebec school calendar",
+        "description": "Add a calendar source. The URL can point to a PDF, an iCalendar file, or a school website page. More sources can be added later from the options.",
+        "data": {
+          "name": "Calendar name",
+          "source_url": "Source URL",
+          "source_type": "Source type",
+          "refresh_interval": "Refresh interval (seconds)",
+          "enable_ocr": "Enable OCR for scanned PDFs"
+        },
+        "data_description": {
+          "source_url": "Leave empty to create the calendar without a source and add one later.",
+          "source_type": "\"School website\" automatically looks for calendar documents in the page.",
+          "enable_ocr": "Only useful for a scanned PDF with no text layer. Grid calendars do not need it. Requires tesseract and poppler, which are not present in Home Assistant OS or Container."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "The provided URL is unreachable.",
+      "invalid_url": "The address must be a valid HTTP or HTTPS URL.",
+      "not_a_calendar": "This document does not look like a school calendar: no holiday, pedagogical day, spring break or term start was found. Check the address. If it is a scanned PDF, enable OCR.",
+      "unknown": "An unexpected error occurred."
+    },
+    "abort": {
+      "already_configured": "This calendar source is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "School calendar options",
+        "description": "What would you like to do?",
+        "menu_options": {
+          "settings": "Change settings",
+          "add_source": "Add a source",
+          "remove_source": "Remove sources",
+          "feed": "Publish to an external calendar app"
+        }
+      },
+      "feed": {
+        "title": "iCalendar feed",
+        "description": "Subscribe your phone to this address to see the school calendar in its Calendar app.\n\n**{url}**\n\nOn iPhone: Settings > Apps > Calendar > Accounts > Add Account > Other > Add Subscribed Calendar.\n\nThis address acts as a password: anyone who has it can read the calendar. Access is read-only. Rotate the secret if you shared it by mistake, which will invalidate existing subscriptions.",
+        "data": {
+          "rotate_secret": "Rotate the secret"
+        }
+      },
+      "settings": {
+        "title": "Settings",
+        "data": {
+          "refresh_interval": "Refresh interval (seconds)",
+          "enable_ocr": "Enable OCR for scanned PDFs"
+        },
+        "data_description": {
+          "enable_ocr": "Only useful for a scanned PDF with no text layer. Grid calendars do not need it. Requires tesseract and poppler, which are not present in Home Assistant OS or Container."
+        }
+      },
+      "add_source": {
+        "title": "Add a source",
+        "data": {
+          "name": "Source name",
+          "source_url": "Source URL",
+          "source_type": "Source type"
+        }
+      },
+      "remove_source": {
+        "title": "Remove sources",
+        "description": "Select the sources to remove.",
+        "data": {
+          "sources": "Sources"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "The provided URL is unreachable.",
+      "invalid_url": "The address must be a valid HTTP or HTTPS URL.",
+      "not_a_calendar": "This document does not look like a school calendar: no holiday, pedagogical day, spring break or term start was found. Check the address. If it is a scanned PDF, enable OCR.",
+      "already_exists": "This source is already configured.",
+      "unknown": "An unexpected error occurred."
+    },
+    "abort": {
+      "no_sources": "No source is configured for this calendar."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "total_events": {
+        "name": "Total events"
+      },
+      "next_event": {
+        "name": "Next event"
+      },
+      "upcoming_events": {
+        "name": "Events in the next 7 days"
+      },
+      "status": {
+        "name": "Status",
+        "state": {
+          "ready": "Ready",
+          "no_sources": "No sources",
+          "no_events": "No events",
+          "error": "Error"
+        }
+      }
+    },
+    "binary_sensor": {
+      "school_open": {
+        "name": "School open"
+      },
+      "event_today": {
+        "name": "Event today"
+      },
+      "holiday_today": {
+        "name": "Holiday today"
+      }
+    }
+  },
+  "selector": {
+    "source_type": {
+      "options": {
+        "direct_url": "Direct document (PDF or iCalendar)",
+        "school_website": "School website",
+        "ical": "iCalendar file"
+      }
+    }
+  },
+  "services": {
+    "add_source": {
+      "name": "Add source",
+      "description": "Adds a calendar source to an existing calendar. The calendar is reloaded and events are fetched immediately.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Calendar",
+          "description": "Calendar to modify. Required when several calendars are configured."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Name given to the source."
+        },
+        "source_url": {
+          "name": "Source URL",
+          "description": "Address of the PDF, iCalendar file, or school website page."
+        },
+        "source_type": {
+          "name": "Source type",
+          "description": "Determines whether the address is a direct document or a page to crawl."
+        }
+      }
+    },
+    "remove_source": {
+      "name": "Remove source",
+      "description": "Removes a calendar source. The calendar is reloaded.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Calendar",
+          "description": "Calendar to modify. Required when several calendars are configured."
+        },
+        "source_id": {
+          "name": "Source",
+          "description": "Identifier or URL of the source to remove. The identifier is listed in the status sensor attributes."
+        }
+      }
+    },
+    "refresh_calendar": {
+      "name": "Refresh calendar",
+      "description": "Forces an immediate fetch of all sources.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Calendar",
+          "description": "Calendar to refresh. All calendars when omitted."
+        }
+      }
+    },
+    "parse_pdf": {
+      "name": "Parse PDF",
+      "description": "Parses a local PDF and returns the detected events without adding them to the calendar. Useful to validate a document before adding it as a source.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Calendar",
+          "description": "Calendar whose settings are used for parsing. Required when several calendars are configured."
+        },
+        "file_path": {
+          "name": "File path",
+          "description": "Path to the PDF. Its directory must be listed in allowlist_external_dirs."
+        }
+      }
+    }
+  }
+}

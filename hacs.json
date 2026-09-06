@@ -1,0 +1,9 @@
+{
+  "name": "Calendrier Scolaire Québécois",
+  "render_readme": true,
+  "homeassistant": "2026.1.0",
+  "content_in_root": false,
+  "zip_release": true,
+  "filename": "calendrier_scolaire_quebecois.zip",
+  "country": ["CA"]
+}

@@ -1,0 +1,62 @@
+add_source:
+  fields:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: calendrier_scolaire_quebecois
+    name:
+      required: true
+      example: Calendrier 2024-2025
+      selector:
+        text:
+    source_url:
+      required: true
+      example: https://exemple.qc.ca/calendrier-scolaire.pdf
+      selector:
+        text:
+          type: url
+    source_type:
+      required: false
+      default: direct_url
+      selector:
+        select:
+          translation_key: source_type
+          options:
+            - direct_url
+            - school_website
+            - ical
+
+remove_source:
+  fields:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: calendrier_scolaire_quebecois
+    source_id:
+      required: true
+      example: 6b1f2c8a9d04
+      selector:
+        text:
+
+refresh_calendar:
+  fields:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: calendrier_scolaire_quebecois
+
+parse_pdf:
+  fields:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: calendrier_scolaire_quebecois
+    file_path:
+      required: true
+      example: /config/calendriers/calendrier-2024-2025.pdf
+      selector:
+        text:

@@ -1,0 +1,29 @@
+# Dependances de developpement et d'integration continue.
+#
+# Ce fichier n'est pas lu par Home Assistant ni par HACS: les dependances
+# d'execution que l'utilisateur recoit sont celles declarees dans
+# manifest.json. Il sert a preparer un environnement de developpement complet
+# et est installe par le workflow de validation.
+#
+#   pip install -r requirements.txt
+#   pytest tests/
+
+# --- Dependances d'execution -------------------------------------------------
+# A garder synchronisees avec la cle "requirements" de manifest.json.
+pdfplumber>=0.10.3
+icalendar>=5.0.11
+
+# Dependances facultatives de l'OCR. Elles exigent aussi les binaires systeme
+# tesseract (avec le paquet de langue fra) et poppler.
+# pytesseract>=0.3.10
+# pdf2image>=1.17.0
+# pillow>=10.0.0
+
+# --- Outillage de test et de qualite -----------------------------------------
+# Fournit pytest, Home Assistant et ses fixtures de test.
+pytest-homeassistant-custom-component
+
+pytest-cov
+black
+flake8
+mypy

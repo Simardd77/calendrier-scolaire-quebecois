@@ -1,0 +1,191 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Calendrier scolaire québécois",
+        "description": "Ajoutez une source de calendrier. L'URL peut pointer vers un PDF, un fichier iCalendar ou la page d'un établissement. Vous pourrez ajouter d'autres sources plus tard dans les options.",
+        "data": {
+          "name": "Nom du calendrier",
+          "source_url": "URL de la source",
+          "source_type": "Type de source",
+          "refresh_interval": "Intervalle de rafraîchissement (secondes)",
+          "enable_ocr": "Activer l'OCR pour les PDF numérisés"
+        },
+        "data_description": {
+          "source_url": "Laissez vide pour créer le calendrier sans source et l'alimenter plus tard.",
+          "source_type": "« Site d'établissement » cherche automatiquement les documents de calendrier dans la page.",
+          "enable_ocr": "Utile uniquement pour un PDF numérisé, sans couche texte. Les calendriers en grille n'en ont pas besoin. Requiert tesseract et poppler, absents de Home Assistant OS et Container."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "L'URL fournie est inaccessible.",
+      "invalid_url": "L'adresse doit être une URL HTTP ou HTTPS valide.",
+      "not_a_calendar": "Ce document ne semble pas être un calendrier scolaire : aucun congé, journée pédagogique, relâche ni rentrée n'y a été trouvé. Vérifiez l'adresse. S'il s'agit d'un PDF numérisé, activez l'OCR.",
+      "unknown": "Une erreur inattendue s'est produite."
+    },
+    "abort": {
+      "already_configured": "Cette source de calendrier est déjà configurée."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options du calendrier scolaire",
+        "description": "Que souhaitez-vous faire ?",
+        "menu_options": {
+          "settings": "Modifier les réglages",
+          "add_source": "Ajouter une source",
+          "remove_source": "Retirer des sources",
+          "feed": "Publier vers un agenda externe"
+        }
+      },
+      "feed": {
+        "title": "Flux iCalendar",
+        "description": "Abonnez votre téléphone à cette adresse pour voir le calendrier scolaire dans son application Agenda.\n\n**{url}**\n\nSur iPhone : Réglages > Apps > Calendrier > Comptes > Ajouter un compte > Autre > Ajouter un calendrier avec abonnement.\n\nCette adresse tient lieu de mot de passe : toute personne qui la possède peut consulter le calendrier, en lecture seule. Renouvelez le secret si vous l'avez partagée par erreur, ce qui invalidera les abonnements existants.",
+        "data": {
+          "rotate_secret": "Renouveler le secret"
+        }
+      },
+      "settings": {
+        "title": "Réglages",
+        "data": {
+          "refresh_interval": "Intervalle de rafraîchissement (secondes)",
+          "enable_ocr": "Activer l'OCR pour les PDF numérisés"
+        },
+        "data_description": {
+          "enable_ocr": "Utile uniquement pour un PDF numérisé, sans couche texte. Les calendriers en grille n'en ont pas besoin. Requiert tesseract et poppler, absents de Home Assistant OS et Container."
+        }
+      },
+      "add_source": {
+        "title": "Ajouter une source",
+        "data": {
+          "name": "Nom de la source",
+          "source_url": "URL de la source",
+          "source_type": "Type de source"
+        }
+      },
+      "remove_source": {
+        "title": "Retirer des sources",
+        "description": "Sélectionnez les sources à retirer.",
+        "data": {
+          "sources": "Sources"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "L'URL fournie est inaccessible.",
+      "invalid_url": "L'adresse doit être une URL HTTP ou HTTPS valide.",
+      "not_a_calendar": "Ce document ne semble pas être un calendrier scolaire : aucun congé, journée pédagogique, relâche ni rentrée n'y a été trouvé. Vérifiez l'adresse. S'il s'agit d'un PDF numérisé, activez l'OCR.",
+      "already_exists": "Cette source est déjà configurée.",
+      "unknown": "Une erreur inattendue s'est produite."
+    },
+    "abort": {
+      "no_sources": "Aucune source n'est configurée pour ce calendrier."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "total_events": {
+        "name": "Total d'événements"
+      },
+      "next_event": {
+        "name": "Prochain événement"
+      },
+      "upcoming_events": {
+        "name": "Événements des 7 prochains jours"
+      },
+      "status": {
+        "name": "État",
+        "state": {
+          "ready": "Prêt",
+          "no_sources": "Aucune source",
+          "no_events": "Aucun événement",
+          "error": "Erreur"
+        }
+      }
+    },
+    "binary_sensor": {
+      "school_open": {
+        "name": "École ouverte"
+      },
+      "event_today": {
+        "name": "Événement aujourd'hui"
+      },
+      "holiday_today": {
+        "name": "Congé aujourd'hui"
+      }
+    }
+  },
+  "selector": {
+    "source_type": {
+      "options": {
+        "direct_url": "Document direct (PDF ou iCalendar)",
+        "school_website": "Site d'établissement",
+        "ical": "Fichier iCalendar"
+      }
+    }
+  },
+  "services": {
+    "add_source": {
+      "name": "Ajouter une source",
+      "description": "Ajoute une source de calendrier à un calendrier existant. Le calendrier est rechargé et les événements sont récupérés immédiatement.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Calendrier",
+          "description": "Calendrier à modifier. Requis si plusieurs calendriers sont configurés."
+        },
+        "name": {
+          "name": "Nom",
+          "description": "Nom donné à la source."
+        },
+        "source_url": {
+          "name": "URL de la source",
+          "description": "Adresse du PDF, du fichier iCalendar ou de la page de l'établissement."
+        },
+        "source_type": {
+          "name": "Type de source",
+          "description": "Détermine si l'adresse est un document direct ou une page à explorer."
+        }
+      }
+    },
+    "remove_source": {
+      "name": "Retirer une source",
+      "description": "Retire une source de calendrier. Le calendrier est rechargé.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Calendrier",
+          "description": "Calendrier à modifier. Requis si plusieurs calendriers sont configurés."
+        },
+        "source_id": {
+          "name": "Source",
+          "description": "Identifiant ou URL de la source à retirer. L'identifiant figure dans les attributs du capteur d'état."
+        }
+      }
+    },
+    "refresh_calendar": {
+      "name": "Actualiser le calendrier",
+      "description": "Force la récupération immédiate de toutes les sources.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Calendrier",
+          "description": "Calendrier à actualiser. Tous les calendriers si omis."
+        }
+      }
+    },
+    "parse_pdf": {
+      "name": "Analyser un PDF",
+      "description": "Analyse un PDF local et retourne les événements détectés sans les ajouter au calendrier. Utile pour valider un document avant de l'ajouter comme source.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Calendrier",
+          "description": "Calendrier dont les réglages servent à l'analyse. Requis si plusieurs calendriers sont configurés."
+        },
+        "file_path": {
+          "name": "Chemin du fichier",
+          "description": "Chemin du PDF. Son répertoire doit figurer dans allowlist_external_dirs."
+        }
+      }
+    }
+  }
+}

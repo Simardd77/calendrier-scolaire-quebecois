@@ -1,0 +1,14 @@
+{
+  "domain": "calendrier_scolaire_quebecois",
+  "name": "Calendrier Scolaire Québécois",
+  "codeowners": ["@Simardd77"],
+  "config_flow": true,
+  "dependencies": ["http"],
+  "documentation": "https://github.com/Simardd77/calendrier-scolaire-quebecois",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/Simardd77/calendrier-scolaire-quebecois/issues",
+  "loggers": ["pdfminer", "pdfplumber"],
+  "requirements": ["pdfplumber>=0.10.3", "icalendar>=5.0.11"],
+  "version": "1.0.0"
+}
