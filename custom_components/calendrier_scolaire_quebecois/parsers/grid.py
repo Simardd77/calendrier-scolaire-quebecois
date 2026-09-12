@@ -825,11 +825,7 @@ def _match_legend(
         and prototype.height >= 13.5
     ):
         fin = next(
-            (
-                entry
-                for entry in legend
-                if "fin d'etape" in normalize_text(entry.label)
-            ),
+            (entry for entry in legend if "fin d'etape" in normalize_text(entry.label)),
             None,
         )
         if fin is not None:
@@ -1028,10 +1024,7 @@ def extract_events_from_grid(
 
         for first_day, last_day in _merge_consecutive(day_list):
             event_summary = label
-            if (
-                category is EventCategory.HOLIDAY
-                and "relache" in normalize_text(label)
-            ):
+            if category is EventCategory.HOLIDAY and "relache" in normalize_text(label):
                 if (
                     first_day.month == 3
                     and last_day.month == 3

@@ -301,10 +301,7 @@ def _extract_column_lines(page: object) -> list[str]:
                 word
                 for word in row_words
                 if (column == 0 and word["x0"] < boundaries[0])
-                or (
-                    column == 1
-                    and boundaries[0] <= word["x0"] < boundaries[1]
-                )
+                or (column == 1 and boundaries[0] <= word["x0"] < boundaries[1])
                 or (column == 2 and word["x0"] >= boundaries[1])
             ]
             if selected:
