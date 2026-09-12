@@ -10,5 +10,5 @@
   "issue_tracker": "https://github.com/Simardd77/calendrier-scolaire-quebecois/issues",
   "loggers": ["pdfminer", "pdfplumber"],
   "requirements": ["pdfplumber>=0.10.3", "icalendar>=5.0.11"],
-  "version": "1.0.0"
+  "version": "1.0.1"
 }
