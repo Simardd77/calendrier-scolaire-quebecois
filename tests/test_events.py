@@ -29,6 +29,8 @@ from custom_components.calendrier_scolaire_quebecois.parsers.events import (
         ("Examen de mathématiques", EventCategory.EXAM),
         ("Rencontre de parents", EventCategory.MEETING),
         ("Remise des bulletins", EventCategory.MEETING),
+        ("Soirée seulement", EventCategory.MEETING),
+        ("Présentation des enseignants", EventCategory.MEETING),
         ("Photo scolaire", EventCategory.EVENT),
     ],
 )
@@ -47,6 +49,16 @@ def test_classify_pedagogique_prime_sur_conge():
     libelle = "Journée pédagogique (congé pour les élèves)"
 
     assert classify(libelle) == EventCategory.PEDAGOGICAL_DAY
+
+
+def test_classify_rencontre_prime_sur_legende_pedagogique_fusionnee():
+    """Une cellule de tableau peut fusionner une rencontre et une legende."""
+    libelle = (
+        "Basketball : Camp de sélection 9 septembre | "
+        "Assemblée générale de parents Journée pédagogique | DGA"
+    )
+
+    assert classify(libelle) == EventCategory.MEETING
 
 
 def test_classify_insensible_aux_accents():
