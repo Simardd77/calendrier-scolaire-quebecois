@@ -335,7 +335,9 @@ def extract_events_from_text(
             category = EventCategory.EVENT
 
         summary = remainder or _CATEGORY_LABELS[category]
-        if category is EventCategory.HOLIDAY and "relache" in normalize_text(summary):
+        if category is EventCategory.HOLIDAY and normalize_text(summary).startswith(
+            "semaine de relache"
+        ):
             summary = "Semaine de relâche"
 
         for span in spans:

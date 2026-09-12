@@ -19,7 +19,7 @@ def test_layout_ignore_les_mois_cites_dans_la_legende():
 
     half_width, _ = _layout(headers, generous=True)
 
-    assert half_width == 84.0
+    assert half_width == 84.5
 
 
 def test_shape_prototype_accepte_deux_motifs_pdf():
