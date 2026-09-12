@@ -169,7 +169,6 @@ def test_extraction_clarifie_une_soiree_seulement():
     assert len(evenements) == 1
     assert evenements[0].category is EventCategory.MEETING
     assert evenements[0].summary == "Rencontre de parents (soirée seulement)"
-    assert evenements[0].category == EventCategory.HOLIDAY
 
 
 def test_extraction_plage_couvre_toute_la_periode():
