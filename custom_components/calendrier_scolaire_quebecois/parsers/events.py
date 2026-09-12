@@ -339,6 +339,8 @@ def extract_events_from_text(
             "semaine de relache"
         ):
             summary = "Semaine de relâche"
+        elif normalize_text(summary) == "soiree seulement":
+            summary = "Rencontre de parents (soirée seulement)"
 
         for span in spans:
             events.append(
