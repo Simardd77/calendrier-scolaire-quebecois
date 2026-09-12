@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import logging
+import unicodedata
 from dataclasses import dataclass, field
 
 from . import DependencyMissingError
@@ -135,10 +136,15 @@ def read_pdf(data: bytes) -> PdfContent:
                 _LOGGER.debug("Texte illisible sur la page %d", page_number)
                 text = ""
 
+            column_lines = _extract_column_lines(page)
             if text:
-                lines.extend(text.splitlines())
+                text_lines = text.splitlines()
+                if column_lines:
+                    text_lines = _without_column_table(text_lines)
+                lines.extend(text_lines)
 
             lines.extend(_extract_table_lines(page, page_number))
+            lines.extend(column_lines)
 
             if page_number <= MAX_GEOMETRY_PAGES:
                 pages.append(_extract_geometry(page, page_number))
@@ -170,6 +176,21 @@ def _extract_geometry(page: object, page_number: int) -> PageGeometry:
     try:
         for shape in list(page.rects) + list(page.curves):  # type: ignore[attr-defined]
             geometry.shapes.append(_subset(shape, _SHAPE_KEYS))
+        for image in page.images:  # type: ignore[attr-defined]
+            if image.get("width", 0) <= 40 and image.get("height", 0) <= 40:
+                geometry.shapes.append(
+                    {
+                        "object_type": "image",
+                        "x0": image["x0"],
+                        "x1": image["x1"],
+                        "top": image["top"],
+                        "bottom": image["bottom"],
+                        "stroke": False,
+                        "fill": True,
+                        "non_stroking_color": "image",
+                        "stroking_color": "none",
+                    }
+                )
     except Exception:  # noqa: BLE001 - geometrie facultative
         _LOGGER.debug("Formes illisibles sur la page %d", page_number)
 
@@ -206,4 +227,96 @@ def _extract_table_lines(page: object, page_number: int) -> list[str]:
             lines.append(" | ".join(cells))
             lines.extend(cell for cell in cells if len(cell) >= 3)
 
+    return lines
+
+
+def _normalize_word(text: str) -> str:
+    """Normalise un mot pour reconnaitre les titres de colonnes."""
+    return "".join(
+        character
+        for character in unicodedata.normalize("NFD", text.lower())
+        if unicodedata.category(character) != "Mn"
+    )
+
+
+def _extract_column_lines(page: object) -> list[str]:
+    """Extrait séparément les colonnes d'un tableau de calendrier.
+
+    Certains PDF placent les dates importantes, les rencontres et la légende
+    sur la même ligne visuelle. L'extraction textuelle ordinaire les concatène,
+    ce qui attribue la catégorie de la légende à la date voisine.
+    """
+    try:
+        words = page.extract_words()  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001 - extraction facultative
+        return []
+
+    legend_words = [
+        word
+        for word in words
+        if _normalize_word(word.get("text", "")).strip() == "legende"
+    ]
+    if not legend_words:
+        return []
+
+    header_top = min(word["top"] for word in legend_words)
+    headers = {
+        title: [
+            word
+            for word in words
+            if _normalize_word(word.get("text", "")).strip() in title.split()
+            and abs(word["top"] - header_top) <= 3
+        ]
+        for title in ("dates importantes", "rencontres de parents", "legende")
+    }
+    if any(not words_for_title for words_for_title in headers.values()):
+        return []
+
+    title_centers = []
+    for title, title_words in headers.items():
+        if max(abs(word["top"] - header_top) for word in title_words) > 3:
+            return []
+        title_centers.append(
+            sum((word["x0"] + word["x1"]) / 2 for word in title_words)
+            / len(title_words)
+        )
+
+    boundaries = [
+        (first + second) / 2
+        for first, second in zip(sorted(title_centers), sorted(title_centers)[1:])
+    ]
+    table_words = [word for word in words if word["top"] > header_top + 8]
+    rows: dict[float, list[dict]] = {}
+    for word in table_words:
+        row_top = min(
+            (top for top in rows if abs(top - word["top"]) <= 1.5),
+            default=round(word["top"], 1),
+        )
+        rows.setdefault(row_top, []).append(word)
+
+    extracted: list[str] = []
+    for row_words in rows.values():
+        for column in (0, 1, 2):
+            selected = [
+                word
+                for word in row_words
+                if (column == 0 and word["x0"] < boundaries[0])
+                or (
+                    column == 1
+                    and boundaries[0] <= word["x0"] < boundaries[1]
+                )
+                or (column == 2 and word["x0"] >= boundaries[1])
+            ]
+            if selected:
+                extracted.append(" ".join(word["text"] for word in selected))
+
+    return extracted
+
+
+def _without_column_table(lines: list[str]) -> list[str]:
+    """Retire la version concaténée d'un tableau déjà extrait."""
+    for index, line in enumerate(lines):
+        normalized = _normalize_word(line)
+        if "dates importantes" in normalized and "legende" in normalized:
+            return lines[:index]
     return lines
