@@ -29,6 +29,26 @@ MAX_UNCATEGORIZED_LENGTH = 120
 # comme telle et non comme un simple conge.
 _KEYWORDS: tuple[tuple[EventCategory, tuple[str, ...]], ...] = (
     (
+        EventCategory.MEETING,
+        (
+            "rencontre de parents",
+            "rencontre parents",
+            "rencontre avec les parents",
+            "remise des bulletins",
+            "remise du bulletin",
+            "bulletin",
+            "assemblee",
+            "conseil d'etablissement",
+            "portes ouvertes",
+            "porte ouverte",
+            "reunion",
+            "communication aux parents",
+            "presentation des enseignants",
+            "soiree seulement",
+            "soiree d'information",
+        ),
+    ),
+    (
         EventCategory.PEDAGOGICAL_DAY,
         (
             "pedagogique",
@@ -90,23 +110,6 @@ _KEYWORDS: tuple[tuple[EventCategory, tuple[str, ...]], ...] = (
             "evaluation",
             "sommative",
             "passation",
-        ),
-    ),
-    (
-        EventCategory.MEETING,
-        (
-            "rencontre de parents",
-            "rencontre parents",
-            "rencontre avec les parents",
-            "remise des bulletins",
-            "remise du bulletin",
-            "bulletin",
-            "assemblee",
-            "conseil d'etablissement",
-            "portes ouvertes",
-            "porte ouverte",
-            "reunion",
-            "communication aux parents",
         ),
     ),
     (
@@ -332,6 +335,10 @@ def extract_events_from_text(
             category = EventCategory.EVENT
 
         summary = remainder or _CATEGORY_LABELS[category]
+        if category is EventCategory.HOLIDAY and normalize_text(summary).startswith(
+            "semaine de relache"
+        ):
+            summary = "Semaine de relâche"
 
         for span in spans:
             events.append(
