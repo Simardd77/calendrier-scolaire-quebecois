@@ -158,6 +158,17 @@ def test_extraction_titre_de_repli_par_categorie():
 
     assert len(evenements) == 1
     assert evenements[0].summary == "Relâche"
+
+
+def test_extraction_clarifie_une_soiree_seulement():
+    """Le libelle du calendrier precise la nature de la rencontre."""
+    evenements = extract_events_from_text(
+        "19 novembre 2026 | Soirée seulement", "Test", 2026
+    )
+
+    assert len(evenements) == 1
+    assert evenements[0].category is EventCategory.MEETING
+    assert evenements[0].summary == "Rencontre de parents (soirée seulement)"
     assert evenements[0].category == EventCategory.HOLIDAY
 
 
