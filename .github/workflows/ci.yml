@@ -272,6 +272,13 @@ jobs:
           FEATS="" FIXES="" CI="" DOCS="" CHORES="" OTHER=""
           while IFS= read -r line; do
             [[ -z "${line}" ]] && continue
+            # Bruit exclu du changelog public: les commits de fusion generes par
+            # GitHub ("Merge pull request #N ...") et le bump de version, qui est
+            # une plomberie de release sans interet pour l'utilisateur.
+            case "${line}" in
+              "Merge pull request "*|"Merge branch "*) continue ;;
+              chore:*bump*|chore:*version*) continue ;;
+            esac
             case "${line}" in
               feat*) FEATS="${FEATS}- ${line}\n" ;;
               fix*)  FIXES="${FIXES}- ${line}\n" ;;
