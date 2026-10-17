@@ -24,6 +24,11 @@ icalendar>=5.0.11
 pytest-homeassistant-custom-component
 
 pytest-cov
-black
-flake8
-mypy
+
+# Les outils dont la sortie peut faire echouer la CI sont epingles: une
+# nouvelle version de black, flake8 ou mypy peut changer ses regles et casser
+# le build sans qu'une ligne du projet n'ait bouge. Mettre a jour ces versions
+# est alors un choix explicite, fait dans une PR dediee.
+black==26.10.1
+flake8==7.4.1
+mypy==2.4.0
