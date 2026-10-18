@@ -114,11 +114,11 @@ jobs:
 
       - name: Lint with flake8
         run: |
-          flake8 custom_components/ --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 custom_components/ tests/ tools/ --count --select=E9,F63,F7,F82 --show-source --statistics
 
       - name: Check code formatting
         run: |
-          black --check custom_components/
+          black --check custom_components/ tests/ tools/
 
       - name: Run tests
         run: |

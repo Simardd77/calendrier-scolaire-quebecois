@@ -308,7 +308,9 @@ check("mot contenant un mois rejete", spans("La maison des jeunes"), [])
 check("date impossible rejetee", spans("31 fevrier 2025"), [])
 check("telephone rejete", spans("Info 514-555-1234"), [])
 
-check("classe pedagogique", classify("Journee pedagogique"), EventCategory.PEDAGOGICAL_DAY)
+check(
+    "classe pedagogique", classify("Journee pedagogique"), EventCategory.PEDAGOGICAL_DAY
+)
 check("classe conge", classify("Conge ferie"), EventCategory.HOLIDAY)
 check(
     "pedagogique prime sur conge",
@@ -392,7 +394,11 @@ check(
     clean_summary("Journees pedagogiques (conge pour les eleves)"),
     "Journees pedagogiques (conge pour les eleves)",
 )
-check("clean_summary retire la ponctuation de bordure", clean_summary(" - Conge : "), "Conge")
+check(
+    "clean_summary retire la ponctuation de bordure",
+    clean_summary(" - Conge : "),
+    "Conge",
+)
 
 events = extract_events_from_text(
     "29 aout 2024 - Rentree scolaire des eleves\n"
@@ -470,7 +476,10 @@ check(
 )
 check(
     "avec grille, les mentions non classees sont ecartees",
-    [event.summary for event in merge_extraction_results([_note, _typed], [_from_grid])],
+    [
+        event.summary
+        for event in merge_extraction_results([_note, _typed], [_from_grid])
+    ],
     ["Rentree des eleves", "Conge"],
 )
 
@@ -542,13 +551,22 @@ print("14. Logique d'analyse en grille")
 # seule plage, mais un ecart contenant un jour ouvrable la coupe.
 check("vendredi vers lundi", _is_bridgeable(date(2027, 3, 26), date(2027, 3, 29)), True)
 check("jours consecutifs", _is_bridgeable(date(2027, 3, 1), date(2027, 3, 2)), True)
-check("ecart avec jour ouvrable", _is_bridgeable(date(2027, 3, 1), date(2027, 3, 4)), False)
+check(
+    "ecart avec jour ouvrable",
+    _is_bridgeable(date(2027, 3, 1), date(2027, 3, 4)),
+    False,
+)
 
 check(
     "fusion du conge des fetes",
     _merge_consecutive(
         [date(2026, 12, 23), date(2026, 12, 24), date(2026, 12, 25)]
-        + [date(2026, 12, 28), date(2026, 12, 29), date(2026, 12, 30), date(2026, 12, 31)]
+        + [
+            date(2026, 12, 28),
+            date(2026, 12, 29),
+            date(2026, 12, 30),
+            date(2026, 12, 31),
+        ]
         + [date(2027, 1, 1), date(2027, 1, 4), date(2027, 1, 5)]
     ),
     [(date(2026, 12, 23), date(2027, 1, 5))],
@@ -569,7 +587,12 @@ check("ombrage incompatible avec contour", circle.distance_to(weekend), None)
 check("types differents incompatibles", square.distance_to(circle), None)
 check(
     "meme famille compatible",
-    round(ShapePrototype("curve", 15.2, 14.2, True, False, "none", "g0.000").distance_to(circle), 2),
+    round(
+        ShapePrototype("curve", 15.2, 14.2, True, False, "none", "g0.000").distance_to(
+            circle
+        ),
+        2,
+    ),
     1.22,
 )
 

@@ -36,9 +36,15 @@ def test_shape_prototype_accepte_deux_motifs_pdf():
             "stroking_color": 0,
         }
 
-    assert ShapePrototype.from_shape(shape("P10")).distance_to(
-        ShapePrototype.from_shape(shape("P26"))
-    ) == 0.0
-    assert ShapePrototype.from_shape(shape("0.918")).distance_to(
-        ShapePrototype.from_shape(shape("1.0"))
-    ) is None
+    assert (
+        ShapePrototype.from_shape(shape("P10")).distance_to(
+            ShapePrototype.from_shape(shape("P26"))
+        )
+        == 0.0
+    )
+    assert (
+        ShapePrototype.from_shape(shape("0.918")).distance_to(
+            ShapePrototype.from_shape(shape("1.0"))
+        )
+        is None
+    )

@@ -86,7 +86,9 @@ rule("2. ANALYSE TEXTUELLE")
 textual = extract_events_from_text(document.text, PDF.stem, school_year)
 print(f"  {len(textual)} evenement(s)")
 for event in textual[:20]:
-    print(f"    {event.first_day} -> {event.last_day}  [{event.category.value}]  {event.summary}")
+    print(
+        f"    {event.first_day} -> {event.last_day}  [{event.category.value}]  {event.summary}"
+    )
 if len(textual) > 20:
     print(f"    ... et {len(textual) - 20} autre(s)")
 
@@ -142,7 +144,9 @@ for index, page in enumerate(document.pages, start=1):
             mean_y = sum(p[1] for p in pts) / len(pts)
             span = max((p[1] for p in pts)) - min((p[1] for p in pts))
             if span:
-                centroid = f" centroide_y={(mean_y - min(p[1] for p in pts)) / span:.2f}"
+                centroid = (
+                    f" centroide_y={(mean_y - min(p[1] for p in pts)) / span:.2f}"
+                )
 
         print(
             f"    {str(shape.get('object_type')):<6} "
@@ -272,7 +276,9 @@ starts = sorted(e.first_day for e in merged if e.category is EventCategory.TERM_
 ends = sorted(e.last_day for e in merged if e.category is EventCategory.TERM_END)
 
 print(f"  rentree         : {[d.isoformat() for d in starts] or 'AUCUNE'}")
-print(f"  fin des classes : {[d.isoformat() for d in ends] or 'AUCUNE (bornee a la fin juin suivante)'}")
+print(
+    f"  fin des classes : {[d.isoformat() for d in ends] or 'AUCUNE (bornee a la fin juin suivante)'}"
+)
 
 verdict = resolve_term_membership(date.today(), starts, ends)
 print(f"\n  aujourd'hui ({date.today().isoformat()}) en periode scolaire : {verdict}")
