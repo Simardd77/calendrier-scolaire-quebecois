@@ -9,11 +9,13 @@ import pytest
 from custom_components.calendrier_scolaire_quebecois.models import (
     MAX_SUMMARY_LENGTH,
     CalendarSource,
+    MANUAL_EVENT_SOURCE,
     EventCategory,
     ManualEvent,
     SchoolEvent,
     build_manual_event_id,
     build_source_id,
+    expand_manual_event,
     clean_summary,
     deduplicate_events,
     exclude_weekends,
@@ -1054,3 +1056,152 @@ def test_manual_event_from_dict_genere_un_id_si_absent():
     assert event.event_id == build_manual_event_id(
         "Cours", date(2026, 9, 1), (1, 3), None
     )
+
+
+# --- expand_manual_event -----------------------------------------------------
+
+
+_TZ = timezone(timedelta(hours=-5))
+
+
+def test_expand_ponctuel_journee_entiere():
+    """Une regle ponctuelle sans heure donne une seule occurrence d'un jour."""
+    rule = ManualEvent(
+        event_id="x",
+        summary="Sortie au musee",
+        start_date=date(2026, 10, 15),
+        end_date=date(2026, 10, 15),
+    )
+    occ = expand_manual_event(rule)
+
+    assert len(occ) == 1
+    event = occ[0]
+    assert event.all_day is True
+    assert event.start == date(2026, 10, 15)
+    assert event.end == date(2026, 10, 16)  # fin exclusive
+    assert event.first_day == event.last_day == date(2026, 10, 15)
+    assert event.category is EventCategory.EVENT
+    assert event.source == MANUAL_EVENT_SOURCE
+    assert event.extra["manual_event_id"] == "x"
+
+
+def test_expand_ponctuel_horodate():
+    """Une regle ponctuelle avec heures donne une occurrence localisee."""
+    rule = ManualEvent(
+        event_id="x",
+        summary="Rencontre",
+        start_date=date(2026, 10, 15),
+        end_date=date(2026, 10, 15),
+        start_time=time(18, 30),
+        end_time=time(20, 0),
+    )
+    occ = expand_manual_event(rule, tz=_TZ)
+
+    assert len(occ) == 1
+    event = occ[0]
+    assert event.all_day is False
+    assert event.start == datetime(2026, 10, 15, 18, 30, tzinfo=_TZ)
+    assert event.end == datetime(2026, 10, 15, 20, 0, tzinfo=_TZ)
+
+
+def test_expand_recurrent_sur_plage():
+    """Une regle hebdomadaire ne retient que les jours demandes de la plage."""
+    rule = ManualEvent(
+        event_id="x",
+        summary="Education physique",
+        start_date=date(2026, 9, 1),  # mardi
+        end_date=date(2026, 9, 14),  # lundi
+        weekdays=(1, 3),  # mardi, jeudi
+        start_time=time(10, 0),
+        end_time=time(11, 0),
+    )
+    occ = expand_manual_event(rule, tz=_TZ)
+
+    jours = [e.first_day for e in occ]
+    assert jours == [
+        date(2026, 9, 1),  # mardi
+        date(2026, 9, 3),  # jeudi
+        date(2026, 9, 8),  # mardi
+        date(2026, 9, 10),  # jeudi
+    ]
+    assert all(e.first_day.weekday() in (1, 3) for e in occ)
+
+
+def test_expand_bornes_inclusives():
+    """start_date et end_date sont toutes deux incluses si elles correspondent."""
+    rule = ManualEvent(
+        event_id="x",
+        summary="Cours",
+        start_date=date(2026, 9, 1),  # mardi
+        end_date=date(2026, 9, 8),  # mardi
+        weekdays=(1,),  # mardi
+    )
+    jours = [e.first_day for e in expand_manual_event(rule)]
+
+    assert jours == [date(2026, 9, 1), date(2026, 9, 8)]
+
+
+def test_expand_recurrent_sans_occurrence():
+    """Une plage ne contenant aucun des jours demandes ne produit rien."""
+    rule = ManualEvent(
+        event_id="x",
+        summary="Cours",
+        start_date=date(2026, 9, 1),  # mardi
+        end_date=date(2026, 9, 4),  # vendredi
+        weekdays=(6,),  # dimanche
+    )
+    assert expand_manual_event(rule) == []
+
+
+def test_expand_horodate_sans_fuseau_leve_une_erreur():
+    """Developper une regle horodatee sans fuseau est refuse."""
+    rule = ManualEvent(
+        event_id="x",
+        summary="Cours",
+        start_date=date(2026, 9, 1),
+        end_date=date(2026, 9, 1),
+        start_time=time(10, 0),
+        end_time=time(11, 0),
+    )
+    with pytest.raises(ValueError, match="fuseau"):
+        expand_manual_event(rule)  # tz manquant
+
+
+def test_expand_journee_entiere_sans_fuseau_ok():
+    """Une regle sans heure ne requiert aucun fuseau."""
+    rule = ManualEvent(
+        event_id="x",
+        summary="Journee pyjama",
+        start_date=date(2026, 12, 18),
+        end_date=date(2026, 12, 18),
+    )
+    assert len(expand_manual_event(rule)) == 1  # aucune erreur
+
+
+def test_expand_occurrences_ont_des_uid_distincts():
+    """Deux occurrences d'une meme regle ont des identifiants differents."""
+    rule = ManualEvent(
+        event_id="x",
+        summary="Cours",
+        start_date=date(2026, 9, 1),
+        end_date=date(2026, 9, 30),
+        weekdays=(1,),
+    )
+    uids = [e.uid for e in expand_manual_event(rule)]
+
+    assert len(uids) == len(set(uids))
+
+
+def test_expand_est_trie_par_debut():
+    """Les occurrences sortent dans l'ordre chronologique."""
+    rule = ManualEvent(
+        event_id="x",
+        summary="Cours",
+        start_date=date(2026, 9, 1),
+        end_date=date(2026, 9, 30),
+        weekdays=(0, 2, 4),
+    )
+    occ = expand_manual_event(rule)
+    debuts = [e.start for e in occ]
+
+    assert debuts == sorted(debuts)

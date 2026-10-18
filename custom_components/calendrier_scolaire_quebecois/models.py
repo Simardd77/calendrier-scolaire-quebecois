@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass, field, replace
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, tzinfo
 from enum import StrEnum
 
 # Longueur maximale d'un titre d'evenement. L'etat d'une entite Home Assistant
@@ -301,7 +301,7 @@ MANUAL_KEY_SKIP_CLOSURES = "skip_closures"
 
 @dataclass(frozen=True, slots=True)
 class ManualEvent:
-    """Regle d'un evenement saisi a la main, avant developpement en occurrences.
+    """Regle d'un evenement saisi a la main, avant generation des occurrences.
 
     L'evenement est **ponctuel** quand ``weekdays`` est vide: il couvre la seule
     journee ``start_date``. Il est **recurrent** sinon: une occurrence pour
@@ -313,8 +313,8 @@ class ManualEvent:
     ces entiers; la conversion est faite en amont.
 
     ``end_date`` est **inclusive**: une regle allant jusqu'au 23 juin couvre le
-    23 juin. La borne exclusive des ``SchoolEvent`` developpes est l'affaire de
-    l'expansion, pas de ce modele.
+    23 juin. La borne exclusive des ``SchoolEvent`` generes est l'affaire de la
+    generation des occurrences, pas de ce modele.
 
     Les heures sont optionnelles mais solidaires: soit les deux sont presentes
     et l'evenement est horodate, soit aucune et il couvre la journee entiere.
@@ -585,6 +585,105 @@ class SchoolEvent:
         heure = self.start.strftime("%H:%M") if isinstance(self.start, datetime) else ""
         raw = f"{self.summary}|{self.first_day}|{self.last_day}|{heure}|{self.source}"
         return sha1(normalize_text(raw).encode("utf-8")).hexdigest()[:16]
+
+
+#: Valeur du champ ``source`` des evenements issus d'une regle manuelle. Elle
+#: les distingue des evenements telecharges dans le ``uid`` et les attributs.
+MANUAL_EVENT_SOURCE = "manuel"
+
+
+def expand_manual_event(
+    rule: ManualEvent, tz: tzinfo | None = None
+) -> list[SchoolEvent]:
+    """Genere les occurrences concretes d'une regle manuelle.
+
+    Une regle decrit un motif (jours de semaine, plage, heures); cette fonction
+    en produit la liste des ``SchoolEvent`` reels, car ni le flux iCalendar ni
+    l'entite calendrier ne gerent une recurrence: chaque occurrence doit
+    exister comme evenement distinct.
+
+    - Ponctuelle (``weekdays`` vide): une seule occurrence sur ``start_date``.
+    - Recurrente: une occurrence par jour de ``weekdays`` tombant dans la plage
+      inclusive [``start_date``, ``end_date``].
+    - Journee entiere (aucune heure): ``end`` exclusif vaut le lendemain.
+    - Horodatee: ``start`` et ``end`` sont des ``datetime`` localises avec ``tz``.
+
+    Le filtrage des occurrences tombant un jour de fermeture n'est PAS fait ici:
+    c'est une etape distincte, qui a besoin du calendrier officiel.
+
+    Args:
+        rule: Regle a partir de laquelle generer les occurrences.
+        tz: Fuseau applique aux occurrences horodatees. Obligatoire des que la
+            regle porte des heures: un ``datetime`` naif serait interprete au
+            fuseau de la machine, donnant une heure fausse dans le flux publie.
+
+    Returns:
+        Occurrences triees par date de debut.
+
+    Raises:
+        ValueError: Si la regle porte des heures et qu'aucun fuseau n'est fourni.
+    """
+    if not rule.all_day and tz is None:
+        raise ValueError(
+            "Un fuseau horaire est requis pour generer les occurrences horodatees"
+        )
+
+    occurrences = [_build_manual_occurrence(rule, day, tz) for day in _rule_days(rule)]
+    occurrences.sort(key=lambda event: event.start)
+    return occurrences
+
+
+def _rule_days(rule: ManualEvent) -> list[date]:
+    """Enumere les journees couvertes par une regle.
+
+    Args:
+        rule: Regle a parcourir.
+
+    Returns:
+        Pour une regle ponctuelle, la seule ``start_date``. Pour une regle
+        recurrente, chaque jour de la plage inclusive dont le jour de semaine
+        figure dans ``weekdays``.
+    """
+    if not rule.is_recurring:
+        return [rule.start_date]
+
+    jours: list[date] = []
+    jour = rule.start_date
+    while jour <= rule.end_date:
+        if jour.weekday() in rule.weekdays:
+            jours.append(jour)
+        jour += timedelta(days=1)
+    return jours
+
+
+def _build_manual_occurrence(
+    rule: ManualEvent, day: date, tz: tzinfo | None
+) -> SchoolEvent:
+    """Construit l'occurrence d'une regle pour une journee donnee.
+
+    Args:
+        rule: Regle dont provient l'occurrence.
+        day: Journee de l'occurrence.
+        tz: Fuseau des occurrences horodatees.
+
+    Returns:
+        Occurrence sous forme de SchoolEvent.
+    """
+    if rule.all_day:
+        start: date | datetime = day
+        end: date | datetime = day + timedelta(days=1)
+    else:
+        start = datetime.combine(day, rule.start_time, tzinfo=tz)
+        end = datetime.combine(day, rule.end_time, tzinfo=tz)
+
+    return SchoolEvent(
+        summary=rule.summary,
+        start=start,
+        end=end,
+        category=EventCategory.EVENT,
+        source=MANUAL_EVENT_SOURCE,
+        extra={"manual_event_id": rule.event_id},
+    )
 
 
 def deduplicate_events(events: list[SchoolEvent]) -> list[SchoolEvent]:
