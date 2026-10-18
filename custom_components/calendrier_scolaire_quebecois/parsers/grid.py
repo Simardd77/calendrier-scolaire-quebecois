@@ -61,6 +61,7 @@ MONTH_HEADERS: dict[str, int] = {
 # Encombrement plausible d'un marqueur entourant un chiffre, en points PDF.
 MIN_MARKER_SIZE = 7.0
 MAX_MARKER_SIZE = 32.0
+MAX_RANGE_MARKER_WIDTH = 180.0
 
 # Ecart maximal, en points, entre une forme de grille et une forme de legende
 # pour les considerer identiques.
@@ -256,7 +257,7 @@ class ShapePrototype:
             return None
         if self.stroked != other.stroked or self.filled != other.filled:
             return None
-        if self.filled and self.fill_color != other.fill_color:
+        if self.filled and not _fills_match(self.fill_color, other.fill_color):
             return None
         if self.stroked and self.stroke_color != other.stroke_color:
             return None
@@ -290,6 +291,20 @@ class ShapePrototype:
                 return False
 
         return True
+
+
+def _fills_match(first: str, second: str) -> bool:
+    """Compare des remplissages, y compris les motifs PDF anonymes.
+
+    Certains generateurs PDF exposent un motif de remplissage sous un nom de
+    ressource (par exemple ``P10``) plutot que sous sa couleur. Le nom change
+    d'une cellule a l'autre, mais la geometrie du marqueur reste disponible et
+    permet a ``distance_to`` de faire le tri. Les couleurs explicites restent,
+    elles, comparees exactement.
+    """
+    if first == second:
+        return True
+    return first.startswith("P") and second.startswith("P")
 
 
 @dataclass(frozen=True, slots=True)
@@ -356,9 +371,28 @@ def _is_candidate_marker(shape: dict) -> bool:
     width = shape["x1"] - shape["x0"]
     height = shape["bottom"] - shape["top"]
 
-    return (
+    regular = (
         MIN_MARKER_SIZE <= width <= MAX_MARKER_SIZE
         and MIN_MARKER_SIZE <= height <= MAX_MARKER_SIZE
+    )
+    if regular:
+        return True
+
+    if (
+        shape.get("object_type") == "curve"
+        and shape.get("stroke")
+        and not shape.get("fill")
+        and MIN_MARKER_SIZE / 2 <= width <= MAX_MARKER_SIZE
+        and MIN_MARKER_SIZE <= height <= MAX_MARKER_SIZE
+    ):
+        return True
+
+    fill = shape.get("non_stroking_color")
+    return (
+        isinstance(fill, str)
+        and fill.startswith("P")
+        and MIN_MARKER_SIZE <= height <= MAX_MARKER_SIZE
+        and MIN_MARKER_SIZE <= width <= MAX_RANGE_MARKER_WIDTH
     )
 
 
@@ -448,11 +482,28 @@ def _layout(headers: list[_HeaderCandidate], *, generous: bool) -> tuple[float, 
     centers = sorted({round(header.x_center, 1) for header in headers})
     tops = sorted({round(header.top, 1) for header in headers})
 
+    # Les dates de la legende peuvent contenir des noms de mois. Les ecarts
+    # entre tous les centres melangent alors les trois colonnes de la grille
+    # avec ceux de la legende. Les en-tetes alignes sur une meme ligne restent
+    # une reference fiable pour mesurer la largeur des colonnes.
+    centers_by_top: dict[float, list[float]] = defaultdict(list)
+    for header in headers:
+        centers_by_top[round(header.top, 1)].append(round(header.x_center, 1))
+
     column_gaps = [
         second - first
-        for first, second in zip(centers, centers[1:], strict=False)
+        for row_centers in centers_by_top.values()
+        for first, second in zip(
+            sorted(set(row_centers)), sorted(set(row_centers))[1:], strict=False
+        )
         if second - first > 20
     ]
+    if not column_gaps:
+        column_gaps = [
+            second - first
+            for first, second in zip(centers, centers[1:], strict=False)
+            if second - first > 20
+        ]
     row_gaps = [
         second - first
         for first, second in zip(tops, tops[1:], strict=False)
@@ -678,6 +729,25 @@ def _build_legend(
         Entrees de legende exploitables.
     """
     entries: list[LegendEntry] = []
+    legend_words = [
+        word
+        for word in words
+        if normalize_text(word.get("text", "").strip()) == "legende"
+    ]
+    meeting_words = [
+        word
+        for word in words
+        if normalize_text(word.get("text", "").strip()) == "rencontres"
+    ]
+    legend_left = None
+    if legend_words and meeting_words:
+        legend_center = sum(_center(word)[0] for word in legend_words) / len(
+            legend_words
+        )
+        meeting_center = sum(_center(word)[0] for word in meeting_words) / len(
+            meeting_words
+        )
+        legend_left = (legend_center + meeting_center) / 2
 
     for shape in shapes:
         x, y = _center(shape)
@@ -687,6 +757,14 @@ def _build_legend(
         label = _label_right_of(shape, words)
         if not label:
             continue
+        if legend_left is not None and x < legend_left:
+            is_color_key = (
+                y > 700
+                and shape.get("fill")
+                and isinstance(shape.get("non_stroking_color"), (list, tuple))
+            )
+            if not is_color_key:
+                continue
 
         entries.append(
             LegendEntry(
@@ -711,6 +789,48 @@ def _match_legend(
     Returns:
         Entree correspondante, ou None si aucune n'est assez proche.
     """
+    patterned_holidays = [
+        entry
+        for entry in legend
+        if entry.category is EventCategory.HOLIDAY
+        and entry.prototype.filled
+        and entry.prototype.fill_color.startswith("P")
+    ]
+    if prototype.filled and prototype.fill_color.startswith("P"):
+        relache = next(
+            (
+                entry
+                for entry in patterned_holidays
+                if "relache" in normalize_text(entry.label)
+            ),
+            None,
+        )
+        if relache is not None:
+            return relache
+
+    if prototype.filled and prototype.fill_color.startswith("c"):
+        same_color = [
+            entry
+            for entry in legend
+            if entry.prototype.filled
+            and entry.prototype.fill_color == prototype.fill_color
+        ]
+        if same_color:
+            return same_color[0]
+
+    if (
+        prototype.stroked
+        and not prototype.filled
+        and prototype.width >= 16
+        and prototype.height >= 13.5
+    ):
+        fin = next(
+            (entry for entry in legend if "fin d'etape" in normalize_text(entry.label)),
+            None,
+        )
+        if fin is not None:
+            return fin
+
     best: LegendEntry | None = None
     best_distance = MAX_PROTOTYPE_DISTANCE
 
@@ -720,6 +840,10 @@ def _match_legend(
             continue
         best = entry
         best_distance = distance
+
+    if best is None and prototype.filled and prototype.fill_color.startswith("P"):
+        if patterned_holidays:
+            return patterned_holidays[0]
 
     return best
 
@@ -734,7 +858,13 @@ def _enclosed_day(shape: dict, days: list[dict]) -> int | None:
     Returns:
         Numero du jour, ou None si la forme n'encadre aucun chiffre.
     """
-    best: int | None = None
+    enclosed = _enclosed_days(shape, days)
+    return enclosed[0] if enclosed else None
+
+
+def _enclosed_days(shape: dict, days: list[dict]) -> list[int]:
+    """Retourne tous les jours couverts par un marqueur, y compris une plage."""
+    enclosed: list[int] = []
     best_distance = float("inf")
     shape_x, shape_y = _center(shape)
 
@@ -748,11 +878,13 @@ def _enclosed_day(shape: dict, days: list[dict]) -> int | None:
             continue
 
         distance = (word_x - shape_x) ** 2 + (word_y - shape_y) ** 2
-        if distance < best_distance:
+        if shape["x1"] - shape["x0"] > MAX_MARKER_SIZE:
+            enclosed.append(int(word["text"].strip()))
+        elif distance < best_distance:
             best_distance = distance
-            best = int(word["text"].strip())
+            enclosed = [int(word["text"].strip())]
 
-    return best
+    return sorted(set(enclosed))
 
 
 def _merge_consecutive(days: list[date]) -> list[tuple[date, date]]:
@@ -859,22 +991,23 @@ def extract_events_from_grid(
         if entry is None:
             continue
 
-        day = _enclosed_day(shape, days)
-        if day is None:
+        enclosed_days = _enclosed_days(shape, days)
+        if not enclosed_days:
             continue
 
-        try:
-            marked[(entry.label, entry.category)].append(
-                date(region.year, region.month, day)
-            )
-        except ValueError:
-            _LOGGER.debug(
-                "'%s': date impossible %d-%d-%d ignoree",
-                source_name,
-                region.year,
-                region.month,
-                day,
-            )
+        for day in enclosed_days:
+            try:
+                marked[(entry.label, entry.category)].append(
+                    date(region.year, region.month, day)
+                )
+            except ValueError:
+                _LOGGER.debug(
+                    "'%s': date impossible %d-%d-%d ignoree",
+                    source_name,
+                    region.year,
+                    region.month,
+                    day,
+                )
 
     events: list[SchoolEvent] = []
 
@@ -890,9 +1023,21 @@ def extract_events_from_grid(
             continue
 
         for first_day, last_day in _merge_consecutive(day_list):
+            event_summary = label
+            if category is EventCategory.HOLIDAY and "relache" in normalize_text(label):
+                if (
+                    first_day.month == 3
+                    and last_day.month == 3
+                    and 1 <= first_day.day <= 5
+                    and 1 <= last_day.day <= 5
+                ):
+                    event_summary = "Semaine de relâche"
+                else:
+                    event_summary = "Congé pour tous"
+
             events.append(
                 SchoolEvent(
-                    summary=label,
+                    summary=event_summary,
                     start=first_day,
                     end=last_day + timedelta(days=1),
                     category=category,

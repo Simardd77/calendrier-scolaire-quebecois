@@ -58,6 +58,11 @@ def test_clean_summary_conserve_les_parentheses():
     assert clean_summary(valeur) == valeur
 
 
+def test_clean_summary_retire_les_parentheses_vides():
+    """Une date retiree ne doit pas laisser un groupe vide dans le titre."""
+    assert clean_summary("Semaine de relâche ( )") == "Semaine de relâche"
+
+
 def test_clean_summary_tronque_sur_une_frontiere_de_mot():
     """Un titre trop long est tronque sans couper un mot en deux."""
     resultat = clean_summary("mot " * 100)

@@ -16,6 +16,7 @@ from enum import StrEnum
 MAX_SUMMARY_LENGTH = 200
 
 _WHITESPACE_RE = re.compile(r"\s+")
+_EMPTY_PARENS_RE = re.compile(r"\(\s*\)")
 
 
 class EventCategory(StrEnum):
@@ -78,6 +79,7 @@ def clean_summary(value: str) -> str:
         Titre nettoye, possiblement vide.
     """
     collapsed = _WHITESPACE_RE.sub(" ", value).strip()
+    collapsed = _EMPTY_PARENS_RE.sub("", collapsed).strip()
     # Les parentheses ne sont pas retirees: un libelle comme "Journees
     # pedagogiques (conge pour les eleves)" doit rester equilibre.
     collapsed = collapsed.strip(" \t-–—:;,.|/*_")
