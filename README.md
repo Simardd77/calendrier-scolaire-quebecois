@@ -803,6 +803,35 @@ Patriotes et du CSS de Montréal, pour faire tourner les outils sans rien
 télécharger. Ils appartiennent à leur centre de services scolaire respectif.
 N'importe quel autre calendrier PDF fonctionne : passez son chemin en argument.
 
+### Conventions de commit
+
+Le changelog publié à chaque release est généré à partir des messages de commit.
+Deux règles en découlent.
+
+**Le préfixe reste en anglais**, selon la convention Conventional Commits. C'est
+lui qui classe le commit dans le changelog :
+
+| Préfixe | Section du changelog |
+|---|---|
+| `feat:` | 🚀 Nouveautés |
+| `fix:` | 🐛 Corrections |
+| `docs:` | 📝 Documentation |
+| `ci:` | 📦 Intégration continue |
+| `chore:`, `refactor:`, `style:`, `perf:`, `test:` | 🧹 Maintenance |
+
+**La description, après le `:`, s'écrit en français.** Elle apparaît telle
+quelle dans le changelog, que lisent les utilisateurs francophones de
+l'intégration. La CI ne peut pas la traduire : c'est au moment du commit que la
+langue se joue.
+
+```
+feat: ajout du support du calendrier de l'Altitude      ← oui
+feat: support Altitude calendar symbols                 ← non, anglais
+```
+
+Deux types de commits sont exclus du changelog, donc leur langue importe peu :
+les fusions `Merge pull request #N` et le `chore: bump version to X`.
+
 ## Support
 
 Ouvrir une [Issues](https://github.com/Simardd77/calendrier-scolaire-quebecois/issues) pour:
