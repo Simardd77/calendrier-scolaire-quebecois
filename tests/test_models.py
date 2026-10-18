@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 import pytest
 
@@ -10,7 +10,9 @@ from custom_components.calendrier_scolaire_quebecois.models import (
     MAX_SUMMARY_LENGTH,
     CalendarSource,
     EventCategory,
+    ManualEvent,
     SchoolEvent,
+    build_manual_event_id,
     build_source_id,
     clean_summary,
     deduplicate_events,
@@ -839,3 +841,170 @@ def test_singularize_apres_le_decoupage_des_fins_de_semaine():
     for segment in segments:
         assert segment.first_day == segment.last_day
         assert segment.summary.startswith("Congé pour")
+
+
+# --- ManualEvent -------------------------------------------------------------
+
+
+def test_manual_event_aller_retour_ponctuel_journee_entiere():
+    """Un evenement ponctuel de journee entiere survit a la serialisation."""
+    source = ManualEvent(
+        event_id="abc123",
+        summary="Sortie au musee",
+        start_date=date(2026, 10, 15),
+        end_date=date(2026, 10, 15),
+    )
+    reconstruit = ManualEvent.from_dict(source.as_dict())
+
+    assert reconstruit == source
+    assert reconstruit.all_day is True
+    assert reconstruit.is_recurring is False
+
+
+def test_manual_event_aller_retour_recurrent_horodate():
+    """Un evenement recurrent horodate survit a la serialisation."""
+    source = ManualEvent(
+        event_id="def456",
+        summary="Education physique",
+        start_date=date(2026, 9, 1),
+        end_date=date(2027, 6, 23),
+        weekdays=(1, 3),
+        start_time=time(10, 0),
+        end_time=time(11, 0),
+        skip_closures=True,
+    )
+    reconstruit = ManualEvent.from_dict(source.as_dict())
+
+    assert reconstruit == source
+    assert reconstruit.all_day is False
+    assert reconstruit.is_recurring is True
+
+
+def test_manual_event_as_dict_omet_les_heures_absentes():
+    """Les cles d'heure ne sont pas ecrites pour un evenement de journee."""
+    data = ManualEvent(
+        event_id="x",
+        summary="Journee pyjama",
+        start_date=date(2026, 12, 18),
+        end_date=date(2026, 12, 18),
+    ).as_dict()
+
+    assert "start_time" not in data
+    assert "end_time" not in data
+
+
+def test_manual_event_weekdays_dedoublonnes_et_tries():
+    """Les jours de semaine sont normalises: dedoublonnes et ordonnes."""
+    event = ManualEvent.from_dict(
+        {
+            "summary": "Cours",
+            "start_date": "2026-09-01",
+            "end_date": "2026-09-30",
+            "weekdays": [3, 1, 3, 1],
+        }
+    )
+    assert event.weekdays == (1, 3)
+
+
+def test_manual_event_skip_closures_defaut_vrai():
+    """Absent du dictionnaire, skip_closures vaut vrai."""
+    event = ManualEvent.from_dict(
+        {
+            "summary": "Cours",
+            "start_date": "2026-09-01",
+            "end_date": "2026-09-01",
+        }
+    )
+    assert event.skip_closures is True
+
+
+def test_manual_event_refuse_titre_vide():
+    with pytest.raises(ValueError, match="titre"):
+        ManualEvent(
+            event_id="x",
+            summary="   ",
+            start_date=date(2026, 9, 1),
+            end_date=date(2026, 9, 1),
+        )
+
+
+def test_manual_event_refuse_plage_inversee():
+    with pytest.raises(ValueError, match="end_date"):
+        ManualEvent(
+            event_id="x",
+            summary="Cours",
+            start_date=date(2026, 9, 10),
+            end_date=date(2026, 9, 1),
+        )
+
+
+def test_manual_event_refuse_jour_de_semaine_hors_bornes():
+    with pytest.raises(ValueError, match="Jour de semaine"):
+        ManualEvent(
+            event_id="x",
+            summary="Cours",
+            start_date=date(2026, 9, 1),
+            end_date=date(2026, 9, 30),
+            weekdays=(1, 7),
+        )
+
+
+def test_manual_event_refuse_une_seule_heure():
+    with pytest.raises(ValueError, match="ensemble"):
+        ManualEvent(
+            event_id="x",
+            summary="Cours",
+            start_date=date(2026, 9, 1),
+            end_date=date(2026, 9, 1),
+            start_time=time(10, 0),
+        )
+
+
+def test_manual_event_refuse_heures_mal_ordonnees():
+    with pytest.raises(ValueError, match="posterieur"):
+        ManualEvent(
+            event_id="x",
+            summary="Cours",
+            start_date=date(2026, 9, 1),
+            end_date=date(2026, 9, 1),
+            start_time=time(11, 0),
+            end_time=time(10, 0),
+        )
+
+
+def test_manual_event_from_dict_refuse_date_malformee():
+    with pytest.raises(ValueError, match="start_date"):
+        ManualEvent.from_dict(
+            {"summary": "Cours", "start_date": "pas-une-date", "end_date": "2026-09-01"}
+        )
+
+
+def test_manual_event_id_est_deterministe():
+    """Deux regles identiques produisent le meme identifiant."""
+    args = ("Education physique", date(2026, 9, 1), (1, 3), time(10, 0))
+    assert build_manual_event_id(*args) == build_manual_event_id(*args)
+
+
+def test_manual_event_id_change_avec_le_contenu():
+    """Une difference de regle produit un identifiant different."""
+    base = build_manual_event_id("Cours", date(2026, 9, 1), (1,), None)
+    autre_jour = build_manual_event_id("Cours", date(2026, 9, 1), (2,), None)
+    autre_titre = build_manual_event_id("Autre", date(2026, 9, 1), (1,), None)
+
+    assert base != autre_jour
+    assert base != autre_titre
+
+
+def test_manual_event_from_dict_genere_un_id_si_absent():
+    """Sans cle 'id', from_dict derive un identifiant du contenu."""
+    event = ManualEvent.from_dict(
+        {
+            "summary": "Cours",
+            "start_date": "2026-09-01",
+            "end_date": "2026-09-30",
+            "weekdays": [1, 3],
+        }
+    )
+    assert event.event_id == build_manual_event_id(
+        "Cours", date(2026, 9, 1), (1, 3), None
+    )

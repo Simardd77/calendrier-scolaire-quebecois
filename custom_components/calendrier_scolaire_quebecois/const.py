@@ -82,3 +82,9 @@ CONTENT_TYPE_ICS: Final = "text/calendar"
 # incrementer cette valeur exige d'ajouter un async_migrate_entry, sans quoi les
 # entrees deja creees ne seront plus chargees.
 CONFIG_ENTRY_VERSION: Final = 1
+
+# Evenements saisis a la main par l'utilisateur, en plus des sources
+# telechargees. Stockes dans les options de l'entree, a cote de CONF_SOURCES.
+# Chaque entree est une regle (jours de semaine + plage + heures) developpee en
+# occurrences a chaque rafraichissement, et non une liste d'occurrences figees.
+CONF_MANUAL_EVENTS: Final = "manual_events"
