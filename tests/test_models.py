@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 import pytest
 
 from custom_components.calendrier_scolaire_quebecois.models import (
     MAX_SUMMARY_LENGTH,
     CalendarSource,
+    MANUAL_EVENT_SOURCE,
     EventCategory,
+    ManualEvent,
     SchoolEvent,
+    build_manual_event_id,
     build_source_id,
+    expand_manual_event,
+    filter_manual_occurrences,
     clean_summary,
     deduplicate_events,
     exclude_weekends,
@@ -225,6 +230,52 @@ def test_uid_est_deterministe():
 
     assert premier.uid == second.uid
     assert premier.uid != _jour(2024, 9, 4).uid
+
+
+def test_uid_distingue_deux_horaires_le_meme_jour():
+    """Deux evenements horodates identiques sauf l'heure ont des UID distincts.
+
+    Cas d'un evenement manuel: deux cours le meme mardi, a 10h et a 14h, meme
+    titre. Sans l'heure dans le UID, un client iCalendar les confondrait.
+    """
+    tz = timezone(timedelta(hours=-5))
+    jour = date(2026, 9, 8)
+    matin = SchoolEvent(
+        summary="Cours",
+        start=datetime(2026, 9, 8, 10, 0, tzinfo=tz),
+        end=datetime(2026, 9, 8, 11, 0, tzinfo=tz),
+    )
+    apres_midi = SchoolEvent(
+        summary="Cours",
+        start=datetime(2026, 9, 8, 14, 0, tzinfo=tz),
+        end=datetime(2026, 9, 8, 15, 0, tzinfo=tz),
+    )
+
+    assert matin.uid != apres_midi.uid
+    assert jour == matin.first_day == apres_midi.first_day
+
+
+def test_uid_journee_entiere_ignore_l_heure():
+    """Un evenement de journee entiere n'a pas d'heure: son UID est stable.
+
+    Garantit que l'ajout de l'heure au UID ne change rien pour les evenements
+    issus des PDF, qui sont tous des journees entieres.
+    """
+    debut = date(2026, 12, 23)
+    conge = SchoolEvent(
+        summary="Conge des fetes",
+        start=debut,
+        end=debut + timedelta(days=1),
+        category=EventCategory.HOLIDAY,
+    )
+    identique = SchoolEvent(
+        summary="Conge des fetes",
+        start=debut,
+        end=debut + timedelta(days=1),
+        category=EventCategory.HOLIDAY,
+    )
+
+    assert conge.uid == identique.uid
 
 
 # --- deduplicate_events -----------------------------------------------------
@@ -839,3 +890,444 @@ def test_singularize_apres_le_decoupage_des_fins_de_semaine():
     for segment in segments:
         assert segment.first_day == segment.last_day
         assert segment.summary.startswith("Congé pour")
+
+
+# --- ManualEvent -------------------------------------------------------------
+
+
+def test_manual_event_aller_retour_ponctuel_journee_entiere():
+    """Un evenement ponctuel de journee entiere survit a la serialisation."""
+    source = ManualEvent(
+        event_id="abc123",
+        summary="Sortie au musee",
+        start_date=date(2026, 10, 15),
+        end_date=date(2026, 10, 15),
+    )
+    reconstruit = ManualEvent.from_dict(source.as_dict())
+
+    assert reconstruit == source
+    assert reconstruit.all_day is True
+    assert reconstruit.is_recurring is False
+
+
+def test_manual_event_aller_retour_recurrent_horodate():
+    """Un evenement recurrent horodate survit a la serialisation."""
+    source = ManualEvent(
+        event_id="def456",
+        summary="Education physique",
+        start_date=date(2026, 9, 1),
+        end_date=date(2027, 6, 23),
+        weekdays=(1, 3),
+        start_time=time(10, 0),
+        end_time=time(11, 0),
+        skip_closures=True,
+    )
+    reconstruit = ManualEvent.from_dict(source.as_dict())
+
+    assert reconstruit == source
+    assert reconstruit.all_day is False
+    assert reconstruit.is_recurring is True
+
+
+def test_manual_event_as_dict_omet_les_heures_absentes():
+    """Les cles d'heure ne sont pas ecrites pour un evenement de journee."""
+    data = ManualEvent(
+        event_id="x",
+        summary="Journee pyjama",
+        start_date=date(2026, 12, 18),
+        end_date=date(2026, 12, 18),
+    ).as_dict()
+
+    assert "start_time" not in data
+    assert "end_time" not in data
+
+
+def test_manual_event_weekdays_dedoublonnes_et_tries():
+    """Les jours de semaine sont normalises: dedoublonnes et ordonnes."""
+    event = ManualEvent.from_dict(
+        {
+            "summary": "Cours",
+            "start_date": "2026-09-01",
+            "end_date": "2026-09-30",
+            "weekdays": [3, 1, 3, 1],
+        }
+    )
+    assert event.weekdays == (1, 3)
+
+
+def test_manual_event_skip_closures_defaut_vrai():
+    """Absent du dictionnaire, skip_closures vaut vrai."""
+    event = ManualEvent.from_dict(
+        {
+            "summary": "Cours",
+            "start_date": "2026-09-01",
+            "end_date": "2026-09-01",
+        }
+    )
+    assert event.skip_closures is True
+
+
+def test_manual_event_refuse_titre_vide():
+    with pytest.raises(ValueError, match="titre"):
+        ManualEvent(
+            event_id="x",
+            summary="   ",
+            start_date=date(2026, 9, 1),
+            end_date=date(2026, 9, 1),
+        )
+
+
+def test_manual_event_refuse_plage_inversee():
+    with pytest.raises(ValueError, match="end_date"):
+        ManualEvent(
+            event_id="x",
+            summary="Cours",
+            start_date=date(2026, 9, 10),
+            end_date=date(2026, 9, 1),
+        )
+
+
+def test_manual_event_refuse_jour_de_semaine_hors_bornes():
+    with pytest.raises(ValueError, match="Jour de semaine"):
+        ManualEvent(
+            event_id="x",
+            summary="Cours",
+            start_date=date(2026, 9, 1),
+            end_date=date(2026, 9, 30),
+            weekdays=(1, 7),
+        )
+
+
+def test_manual_event_refuse_une_seule_heure():
+    with pytest.raises(ValueError, match="ensemble"):
+        ManualEvent(
+            event_id="x",
+            summary="Cours",
+            start_date=date(2026, 9, 1),
+            end_date=date(2026, 9, 1),
+            start_time=time(10, 0),
+        )
+
+
+def test_manual_event_refuse_heures_mal_ordonnees():
+    with pytest.raises(ValueError, match="posterieur"):
+        ManualEvent(
+            event_id="x",
+            summary="Cours",
+            start_date=date(2026, 9, 1),
+            end_date=date(2026, 9, 1),
+            start_time=time(11, 0),
+            end_time=time(10, 0),
+        )
+
+
+def test_manual_event_from_dict_refuse_date_malformee():
+    with pytest.raises(ValueError, match="start_date"):
+        ManualEvent.from_dict(
+            {"summary": "Cours", "start_date": "pas-une-date", "end_date": "2026-09-01"}
+        )
+
+
+def test_manual_event_id_est_deterministe():
+    """Deux regles identiques produisent le meme identifiant."""
+    args = ("Education physique", date(2026, 9, 1), (1, 3), time(10, 0))
+    assert build_manual_event_id(*args) == build_manual_event_id(*args)
+
+
+def test_manual_event_id_change_avec_le_contenu():
+    """Une difference de regle produit un identifiant different."""
+    base = build_manual_event_id("Cours", date(2026, 9, 1), (1,), None)
+    autre_jour = build_manual_event_id("Cours", date(2026, 9, 1), (2,), None)
+    autre_titre = build_manual_event_id("Autre", date(2026, 9, 1), (1,), None)
+
+    assert base != autre_jour
+    assert base != autre_titre
+
+
+def test_manual_event_from_dict_genere_un_id_si_absent():
+    """Sans cle 'id', from_dict derive un identifiant du contenu."""
+    event = ManualEvent.from_dict(
+        {
+            "summary": "Cours",
+            "start_date": "2026-09-01",
+            "end_date": "2026-09-30",
+            "weekdays": [1, 3],
+        }
+    )
+    assert event.event_id == build_manual_event_id(
+        "Cours", date(2026, 9, 1), (1, 3), None
+    )
+
+
+# --- expand_manual_event -----------------------------------------------------
+
+
+_TZ = timezone(timedelta(hours=-5))
+
+
+def test_expand_ponctuel_journee_entiere():
+    """Une regle ponctuelle sans heure donne une seule occurrence d'un jour."""
+    rule = ManualEvent(
+        event_id="x",
+        summary="Sortie au musee",
+        start_date=date(2026, 10, 15),
+        end_date=date(2026, 10, 15),
+    )
+    occ = expand_manual_event(rule)
+
+    assert len(occ) == 1
+    event = occ[0]
+    assert event.all_day is True
+    assert event.start == date(2026, 10, 15)
+    assert event.end == date(2026, 10, 16)  # fin exclusive
+    assert event.first_day == event.last_day == date(2026, 10, 15)
+    assert event.category is EventCategory.EVENT
+    assert event.source == MANUAL_EVENT_SOURCE
+    assert event.extra["manual_event_id"] == "x"
+
+
+def test_expand_ponctuel_horodate():
+    """Une regle ponctuelle avec heures donne une occurrence localisee."""
+    rule = ManualEvent(
+        event_id="x",
+        summary="Rencontre",
+        start_date=date(2026, 10, 15),
+        end_date=date(2026, 10, 15),
+        start_time=time(18, 30),
+        end_time=time(20, 0),
+    )
+    occ = expand_manual_event(rule, tz=_TZ)
+
+    assert len(occ) == 1
+    event = occ[0]
+    assert event.all_day is False
+    assert event.start == datetime(2026, 10, 15, 18, 30, tzinfo=_TZ)
+    assert event.end == datetime(2026, 10, 15, 20, 0, tzinfo=_TZ)
+
+
+def test_expand_recurrent_sur_plage():
+    """Une regle hebdomadaire ne retient que les jours demandes de la plage."""
+    rule = ManualEvent(
+        event_id="x",
+        summary="Education physique",
+        start_date=date(2026, 9, 1),  # mardi
+        end_date=date(2026, 9, 14),  # lundi
+        weekdays=(1, 3),  # mardi, jeudi
+        start_time=time(10, 0),
+        end_time=time(11, 0),
+    )
+    occ = expand_manual_event(rule, tz=_TZ)
+
+    jours = [e.first_day for e in occ]
+    assert jours == [
+        date(2026, 9, 1),  # mardi
+        date(2026, 9, 3),  # jeudi
+        date(2026, 9, 8),  # mardi
+        date(2026, 9, 10),  # jeudi
+    ]
+    assert all(e.first_day.weekday() in (1, 3) for e in occ)
+
+
+def test_expand_bornes_inclusives():
+    """start_date et end_date sont toutes deux incluses si elles correspondent."""
+    rule = ManualEvent(
+        event_id="x",
+        summary="Cours",
+        start_date=date(2026, 9, 1),  # mardi
+        end_date=date(2026, 9, 8),  # mardi
+        weekdays=(1,),  # mardi
+    )
+    jours = [e.first_day for e in expand_manual_event(rule)]
+
+    assert jours == [date(2026, 9, 1), date(2026, 9, 8)]
+
+
+def test_expand_recurrent_sans_occurrence():
+    """Une plage ne contenant aucun des jours demandes ne produit rien."""
+    rule = ManualEvent(
+        event_id="x",
+        summary="Cours",
+        start_date=date(2026, 9, 1),  # mardi
+        end_date=date(2026, 9, 4),  # vendredi
+        weekdays=(6,),  # dimanche
+    )
+    assert expand_manual_event(rule) == []
+
+
+def test_expand_horodate_sans_fuseau_leve_une_erreur():
+    """Developper une regle horodatee sans fuseau est refuse."""
+    rule = ManualEvent(
+        event_id="x",
+        summary="Cours",
+        start_date=date(2026, 9, 1),
+        end_date=date(2026, 9, 1),
+        start_time=time(10, 0),
+        end_time=time(11, 0),
+    )
+    with pytest.raises(ValueError, match="fuseau"):
+        expand_manual_event(rule)  # tz manquant
+
+
+def test_expand_journee_entiere_sans_fuseau_ok():
+    """Une regle sans heure ne requiert aucun fuseau."""
+    rule = ManualEvent(
+        event_id="x",
+        summary="Journee pyjama",
+        start_date=date(2026, 12, 18),
+        end_date=date(2026, 12, 18),
+    )
+    assert len(expand_manual_event(rule)) == 1  # aucune erreur
+
+
+def test_expand_occurrences_ont_des_uid_distincts():
+    """Deux occurrences d'une meme regle ont des identifiants differents."""
+    rule = ManualEvent(
+        event_id="x",
+        summary="Cours",
+        start_date=date(2026, 9, 1),
+        end_date=date(2026, 9, 30),
+        weekdays=(1,),
+    )
+    uids = [e.uid for e in expand_manual_event(rule)]
+
+    assert len(uids) == len(set(uids))
+
+
+def test_expand_est_trie_par_debut():
+    """Les occurrences sortent dans l'ordre chronologique."""
+    rule = ManualEvent(
+        event_id="x",
+        summary="Cours",
+        start_date=date(2026, 9, 1),
+        end_date=date(2026, 9, 30),
+        weekdays=(0, 2, 4),
+    )
+    occ = expand_manual_event(rule)
+    debuts = [e.start for e in occ]
+
+    assert debuts == sorted(debuts)
+
+
+# --- filter_manual_occurrences -----------------------------------------------
+
+
+def _cours(jour: date, *, skip_closures: bool = True) -> SchoolEvent:
+    """Occurrence manuelle d'une journee, pour alleger les tests du filtre."""
+    return SchoolEvent(
+        summary="Cours",
+        start=jour,
+        end=jour + timedelta(days=1),
+        category=EventCategory.EVENT,
+        source="manuel",
+        extra={"skip_closures": "1" if skip_closures else "0"},
+    )
+
+
+def test_filter_retire_un_jour_de_fermeture():
+    """Une occurrence tombant un jour ferme est retiree."""
+    relache = date(2027, 3, 2)
+    occurrences = [_cours(date(2027, 2, 23)), _cours(relache), _cours(date(2027, 3, 9))]
+
+    conserves = filter_manual_occurrences(occurrences, frozenset({relache}))
+
+    jours = [e.first_day for e in conserves]
+    assert relache not in jours
+    assert jours == [date(2027, 2, 23), date(2027, 3, 9)]
+
+
+def test_filter_ignore_les_occurrences_sans_skip():
+    """Une occurrence a skip_closures faux reste, meme un jour ferme."""
+    relache = date(2027, 3, 2)
+    occurrences = [_cours(relache, skip_closures=False)]
+
+    conserves = filter_manual_occurrences(occurrences, frozenset({relache}))
+
+    assert len(conserves) == 1
+
+
+def test_filter_retire_hors_periode():
+    """Une occurrence avant la rentree ou apres la fin des classes est retiree."""
+    occurrences = [
+        _cours(date(2026, 7, 15)),  # ete, avant la rentree
+        _cours(date(2026, 12, 1)),  # en cours d'annee
+        _cours(date(2027, 7, 15)),  # ete, apres la fin
+    ]
+
+    conserves = filter_manual_occurrences(
+        occurrences,
+        frozenset(),
+        term_start=date(2026, 9, 1),
+        term_end=date(2027, 6, 23),
+    )
+
+    assert [e.first_day for e in conserves] == [date(2026, 12, 1)]
+
+
+def test_filter_bornes_inconnues_ne_filtrent_pas_la_periode():
+    """Sans bornes de periode, seules les fermetures ponctuelles s'appliquent."""
+    occurrences = [_cours(date(2026, 7, 15)), _cours(date(2026, 12, 1))]
+
+    conserves = filter_manual_occurrences(occurrences, frozenset())
+
+    assert len(conserves) == 2  # l'ete n'est pas filtre faute de bornes
+
+
+def test_filter_conserve_les_bornes_de_periode():
+    """Les journees egales a term_start et term_end sont conservees."""
+    occurrences = [_cours(date(2026, 9, 1)), _cours(date(2027, 6, 23))]
+
+    conserves = filter_manual_occurrences(
+        occurrences,
+        frozenset(),
+        term_start=date(2026, 9, 1),
+        term_end=date(2027, 6, 23),
+    )
+
+    assert len(conserves) == 2
+
+
+def test_filter_horodate_teste_la_journee_pas_l_heure():
+    """Une occurrence horodatee un jour ferme est retiree quelle que soit l'heure."""
+    tz = timezone(timedelta(hours=-5))
+    relache = date(2027, 3, 2)
+    occ = SchoolEvent(
+        summary="Cours",
+        start=datetime(2027, 3, 2, 10, 0, tzinfo=tz),
+        end=datetime(2027, 3, 2, 11, 0, tzinfo=tz),
+        category=EventCategory.EVENT,
+        source="manuel",
+        extra={"skip_closures": "1"},
+    )
+
+    conserves = filter_manual_occurrences([occ], frozenset({relache}))
+
+    assert conserves == []
+
+
+def test_filter_preserve_l_ordre():
+    """Les occurrences conservees gardent leur ordre d'origine."""
+    occurrences = [_cours(date(2026, 9, d)) for d in (1, 8, 15, 22)]
+
+    conserves = filter_manual_occurrences(occurrences, frozenset({date(2026, 9, 8)}))
+
+    assert [e.first_day for e in conserves] == [
+        date(2026, 9, 1),
+        date(2026, 9, 15),
+        date(2026, 9, 22),
+    ]
+
+
+def test_filter_chaine_apres_expansion():
+    """L'expansion puis le filtrage donnent le bon resultat de bout en bout."""
+    rule = ManualEvent(
+        event_id="x",
+        summary="Education physique",
+        start_date=date(2027, 2, 23),  # mardi
+        end_date=date(2027, 3, 9),  # mardi
+        weekdays=(1,),  # mardi
+    )
+    occurrences = expand_manual_event(rule)
+    # Mardi 2 mars tombe dans la semaine de relache.
+    conserves = filter_manual_occurrences(occurrences, frozenset({date(2027, 3, 2)}))
+
+    assert [e.first_day for e in conserves] == [date(2027, 2, 23), date(2027, 3, 9)]

@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass, field, replace
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta, tzinfo
 from enum import StrEnum
 
 # Longueur maximale d'un titre d'evenement. L'etat d'une entite Home Assistant
@@ -286,6 +286,205 @@ def build_source_id(url: str) -> str:
     return sha1(url.strip().encode("utf-8")).hexdigest()[:12]
 
 
+#: Cles de serialisation d'un evenement manuel dans les options de l'entree.
+#: Isolees ici, comme SOURCE_KEY_*, pour qu'une modification ne desynchronise
+#: pas lecture et ecriture.
+MANUAL_KEY_ID = "id"
+MANUAL_KEY_SUMMARY = "summary"
+MANUAL_KEY_START = "start_date"
+MANUAL_KEY_END = "end_date"
+MANUAL_KEY_WEEKDAYS = "weekdays"
+MANUAL_KEY_START_TIME = "start_time"
+MANUAL_KEY_END_TIME = "end_time"
+MANUAL_KEY_SKIP_CLOSURES = "skip_closures"
+
+
+@dataclass(frozen=True, slots=True)
+class ManualEvent:
+    """Regle d'un evenement saisi a la main, avant generation des occurrences.
+
+    L'evenement est **ponctuel** quand ``weekdays`` est vide: il couvre la seule
+    journee ``start_date``. Il est **recurrent** sinon: une occurrence pour
+    chaque jour de ``weekdays`` tombant dans la plage inclusive
+    [``start_date``, ``end_date``].
+
+    Les jours de semaine suivent la convention de ``date.weekday()`` du reste du
+    code: lundi vaut 0, dimanche vaut 6. L'utilisateur saisit des noms, jamais
+    ces entiers; la conversion est faite en amont.
+
+    ``end_date`` est **inclusive**: une regle allant jusqu'au 23 juin couvre le
+    23 juin. La borne exclusive des ``SchoolEvent`` generes est l'affaire de la
+    generation des occurrences, pas de ce modele.
+
+    Les heures sont optionnelles mais solidaires: soit les deux sont presentes
+    et l'evenement est horodate, soit aucune et il couvre la journee entiere.
+    """
+
+    event_id: str
+    summary: str
+    start_date: date
+    end_date: date
+    weekdays: tuple[int, ...] = ()
+    start_time: time | None = None
+    end_time: time | None = None
+    skip_closures: bool = True
+
+    def __post_init__(self) -> None:
+        """Valide la coherence de la regle.
+
+        Raises:
+            ValueError: Si un champ est incoherent (titre vide, plage inversee,
+                jour de semaine hors 0-6, heures non solidaires ou mal ordonnees).
+        """
+        if not self.summary.strip():
+            raise ValueError("Un evenement manuel requiert un titre")
+
+        if self.end_date < self.start_date:
+            raise ValueError("end_date ne peut pas preceder start_date")
+
+        for day in self.weekdays:
+            if not 0 <= day <= 6:
+                raise ValueError(f"Jour de semaine invalide: {day} (attendu 0-6)")
+
+        has_start = self.start_time is not None
+        has_end = self.end_time is not None
+        if has_start != has_end:
+            raise ValueError(
+                "start_time et end_time doivent etre fournis ensemble ou pas du tout"
+            )
+        if has_start and self.end_time <= self.start_time:
+            raise ValueError("end_time doit etre strictement posterieur a start_time")
+
+    @property
+    def all_day(self) -> bool:
+        """Indique si la regle produit des occurrences de journee entiere."""
+        return self.start_time is None
+
+    @property
+    def is_recurring(self) -> bool:
+        """Indique si la regle se repete sur des jours de semaine."""
+        return bool(self.weekdays)
+
+    def as_dict(self) -> dict:
+        """Serialise la regle pour stockage dans l'entree de configuration.
+
+        Les dates partent en ISO, les heures en "HH:MM", les jours de semaine en
+        liste d'entiers. Les heures absentes ne sont pas ecrites.
+        """
+        data: dict = {
+            MANUAL_KEY_ID: self.event_id,
+            MANUAL_KEY_SUMMARY: self.summary,
+            MANUAL_KEY_START: self.start_date.isoformat(),
+            MANUAL_KEY_END: self.end_date.isoformat(),
+            MANUAL_KEY_WEEKDAYS: list(self.weekdays),
+            MANUAL_KEY_SKIP_CLOSURES: self.skip_closures,
+        }
+        if self.start_time is not None:
+            data[MANUAL_KEY_START_TIME] = self.start_time.strftime("%H:%M")
+            data[MANUAL_KEY_END_TIME] = self.end_time.strftime("%H:%M")
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict) -> ManualEvent:
+        """Reconstruit une regle depuis un dictionnaire stocke.
+
+        Args:
+            data: Dictionnaire produit par ``as_dict``, ou saisi par un service.
+
+        Returns:
+            Instance de ManualEvent validee.
+
+        Raises:
+            ValueError: Si un champ obligatoire manque ou est mal forme.
+        """
+        summary = (data.get(MANUAL_KEY_SUMMARY) or "").strip()
+        start = _parse_iso_date(data.get(MANUAL_KEY_START), MANUAL_KEY_START)
+        end = _parse_iso_date(data.get(MANUAL_KEY_END), MANUAL_KEY_END)
+
+        raw_weekdays = data.get(MANUAL_KEY_WEEKDAYS) or []
+        try:
+            weekdays = tuple(sorted({int(day) for day in raw_weekdays}))
+        except (TypeError, ValueError) as err:
+            raise ValueError("weekdays doit etre une liste d'entiers") from err
+
+        start_time = _parse_hhmm(data.get(MANUAL_KEY_START_TIME), MANUAL_KEY_START_TIME)
+        end_time = _parse_hhmm(data.get(MANUAL_KEY_END_TIME), MANUAL_KEY_END_TIME)
+
+        event_id = data.get(MANUAL_KEY_ID) or build_manual_event_id(
+            summary, start, weekdays, start_time
+        )
+
+        return cls(
+            event_id=event_id,
+            summary=summary,
+            start_date=start,
+            end_date=end,
+            weekdays=weekdays,
+            start_time=start_time,
+            end_time=end_time,
+            skip_closures=bool(data.get(MANUAL_KEY_SKIP_CLOSURES, True)),
+        )
+
+
+def _parse_iso_date(value: object, field_name: str) -> date:
+    """Lit une date ISO "AAAA-MM-JJ" depuis une valeur stockee ou saisie."""
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} est requis au format AAAA-MM-JJ")
+    try:
+        return date.fromisoformat(value.strip())
+    except ValueError as err:
+        raise ValueError(f"{field_name} invalide: {value!r}") from err
+
+
+def _parse_hhmm(value: object, field_name: str) -> time | None:
+    """Lit une heure "HH:MM", ou None si la valeur est absente."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, time):
+        return value
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} doit etre une heure 'HH:MM'")
+    try:
+        hours, minutes = value.strip().split(":")
+        return time(hour=int(hours), minute=int(minutes))
+    except (ValueError, TypeError) as err:
+        raise ValueError(f"{field_name} invalide: {value!r}") from err
+
+
+def build_manual_event_id(
+    summary: str,
+    start_date: date,
+    weekdays: tuple[int, ...],
+    start_time: time | None,
+) -> str:
+    """Construit un identifiant stable et deterministe pour un evenement manuel.
+
+    Fonde sur le contenu de la regle, sur le modele de ``build_source_id``. Deux
+    regles identiques produisent le meme identifiant, ce qui evite les doublons.
+
+    Args:
+        summary: Titre de l'evenement.
+        start_date: Premiere journee de la regle.
+        weekdays: Jours de semaine, convention lundi=0.
+        start_time: Heure de debut, ou None pour une journee entiere.
+
+    Returns:
+        Identifiant deterministe de 12 caracteres.
+    """
+    from hashlib import sha1
+
+    parts = [
+        summary.strip().lower(),
+        start_date.isoformat(),
+        ",".join(str(day) for day in sorted(weekdays)),
+        start_time.strftime("%H:%M") if start_time is not None else "",
+    ]
+    empreinte = "|".join(parts).encode("utf-8")
+    return sha1(empreinte).hexdigest()[:12]
+
+
 @dataclass(frozen=True, slots=True)
 class SchoolEvent:
     """Un evenement du calendrier scolaire.
@@ -373,11 +572,176 @@ class SchoolEvent:
 
     @property
     def uid(self) -> str:
-        """Identifiant stable de l'evenement."""
+        """Identifiant stable de l'evenement.
+
+        L'heure entre dans l'identifiant pour les evenements horodates: deux
+        evenements de meme titre et meme journee mais a des heures differentes
+        (par exemple deux cours manuels le meme mardi) doivent avoir des UID
+        distincts, sans quoi un client iCalendar les confondrait. Les evenements
+        de journee entiere n'ont pas d'heure: leur UID est inchange.
+        """
         from hashlib import sha1
 
-        raw = f"{self.summary}|{self.first_day}|{self.last_day}|{self.source}"
+        heure = self.start.strftime("%H:%M") if isinstance(self.start, datetime) else ""
+        raw = f"{self.summary}|{self.first_day}|{self.last_day}|{heure}|{self.source}"
         return sha1(normalize_text(raw).encode("utf-8")).hexdigest()[:16]
+
+
+#: Valeur du champ ``source`` des evenements issus d'une regle manuelle. Elle
+#: les distingue des evenements telecharges dans le ``uid`` et les attributs.
+MANUAL_EVENT_SOURCE = "manuel"
+
+
+def expand_manual_event(
+    rule: ManualEvent, tz: tzinfo | None = None
+) -> list[SchoolEvent]:
+    """Genere les occurrences concretes d'une regle manuelle.
+
+    Une regle decrit un motif (jours de semaine, plage, heures); cette fonction
+    en produit la liste des ``SchoolEvent`` reels, car ni le flux iCalendar ni
+    l'entite calendrier ne gerent une recurrence: chaque occurrence doit
+    exister comme evenement distinct.
+
+    - Ponctuelle (``weekdays`` vide): une seule occurrence sur ``start_date``.
+    - Recurrente: une occurrence par jour de ``weekdays`` tombant dans la plage
+      inclusive [``start_date``, ``end_date``].
+    - Journee entiere (aucune heure): ``end`` exclusif vaut le lendemain.
+    - Horodatee: ``start`` et ``end`` sont des ``datetime`` localises avec ``tz``.
+
+    Le filtrage des occurrences tombant un jour de fermeture n'est PAS fait ici:
+    c'est une etape distincte, qui a besoin du calendrier officiel.
+
+    Args:
+        rule: Regle a partir de laquelle generer les occurrences.
+        tz: Fuseau applique aux occurrences horodatees. Obligatoire des que la
+            regle porte des heures: un ``datetime`` naif serait interprete au
+            fuseau de la machine, donnant une heure fausse dans le flux publie.
+
+    Returns:
+        Occurrences triees par date de debut.
+
+    Raises:
+        ValueError: Si la regle porte des heures et qu'aucun fuseau n'est fourni.
+    """
+    if not rule.all_day and tz is None:
+        raise ValueError(
+            "Un fuseau horaire est requis pour generer les occurrences horodatees"
+        )
+
+    occurrences = [_build_manual_occurrence(rule, day, tz) for day in _rule_days(rule)]
+    occurrences.sort(key=lambda event: event.start)
+    return occurrences
+
+
+def _rule_days(rule: ManualEvent) -> list[date]:
+    """Enumere les journees couvertes par une regle.
+
+    Args:
+        rule: Regle a parcourir.
+
+    Returns:
+        Pour une regle ponctuelle, la seule ``start_date``. Pour une regle
+        recurrente, chaque jour de la plage inclusive dont le jour de semaine
+        figure dans ``weekdays``.
+    """
+    if not rule.is_recurring:
+        return [rule.start_date]
+
+    jours: list[date] = []
+    jour = rule.start_date
+    while jour <= rule.end_date:
+        if jour.weekday() in rule.weekdays:
+            jours.append(jour)
+        jour += timedelta(days=1)
+    return jours
+
+
+def _build_manual_occurrence(
+    rule: ManualEvent, day: date, tz: tzinfo | None
+) -> SchoolEvent:
+    """Construit l'occurrence d'une regle pour une journee donnee.
+
+    Args:
+        rule: Regle dont provient l'occurrence.
+        day: Journee de l'occurrence.
+        tz: Fuseau des occurrences horodatees.
+
+    Returns:
+        Occurrence sous forme de SchoolEvent.
+    """
+    if rule.all_day:
+        start: date | datetime = day
+        end: date | datetime = day + timedelta(days=1)
+    else:
+        start = datetime.combine(day, rule.start_time, tzinfo=tz)
+        end = datetime.combine(day, rule.end_time, tzinfo=tz)
+
+    return SchoolEvent(
+        summary=rule.summary,
+        start=start,
+        end=end,
+        category=EventCategory.EVENT,
+        source=MANUAL_EVENT_SOURCE,
+        extra={
+            "manual_event_id": rule.event_id,
+            # Chaque occurrence porte le drapeau, pour que le filtrage des jours
+            # de fermeture soit autonome, sans relire la regle d'origine.
+            "skip_closures": "1" if rule.skip_closures else "0",
+        },
+    )
+
+
+def filter_manual_occurrences(
+    occurrences: list[SchoolEvent],
+    closed_days: frozenset[date],
+    term_start: date | None = None,
+    term_end: date | None = None,
+) -> list[SchoolEvent]:
+    """Retire les occurrences manuelles tombant un jour de fermeture scolaire.
+
+    N'agit que sur les occurrences dont le drapeau ``skip_closures`` est vrai,
+    lu dans ``extra``. Les autres traversent la fonction intactes, de meme que
+    tout evenement qui ne serait pas d'origine manuelle.
+
+    Une occurrence concernee est retiree quand sa journee est:
+
+    - dans ``closed_days`` (conge, journee pedagogique, jour ferie), ou
+    - hors de la periode scolaire, lorsque les bornes sont connues: avant
+      ``term_start`` ou apres ``term_end``. Une borne a ``None`` est ignoree,
+      faute d'information on ne presume aucune fermeture de ce cote.
+
+    Le test porte sur la journee (``first_day``), jamais sur l'heure: un cours de
+    10 h un jour de relache est retire quelle que soit son heure.
+
+    Args:
+        occurrences: Occurrences a filtrer, typiquement issues de
+            ``expand_manual_event``.
+        closed_days: Jours de fermeture ponctuelle, pre-calcules une seule fois
+            par l'appelant pour un test en temps constant.
+        term_start: Premiere journee de l'annee scolaire, ou None si inconnue.
+        term_end: Derniere journee de l'annee scolaire, ou None si inconnue.
+
+    Returns:
+        Occurrences conservees, dans leur ordre d'origine.
+    """
+    conserves: list[SchoolEvent] = []
+
+    for event in occurrences:
+        if event.extra.get("skip_closures") != "1":
+            conserves.append(event)
+            continue
+
+        jour = event.first_day
+        if jour in closed_days:
+            continue
+        if term_start is not None and jour < term_start:
+            continue
+        if term_end is not None and jour > term_end:
+            continue
+
+        conserves.append(event)
+
+    return conserves
 
 
 def deduplicate_events(events: list[SchoolEvent]) -> list[SchoolEvent]:

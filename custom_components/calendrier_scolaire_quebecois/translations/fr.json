@@ -124,6 +124,17 @@
         "school_website": "Site d'établissement",
         "ical": "Fichier iCalendar"
       }
+    },
+    "weekdays": {
+      "options": {
+        "0": "Lundi",
+        "1": "Mardi",
+        "2": "Mercredi",
+        "3": "Jeudi",
+        "4": "Vendredi",
+        "5": "Samedi",
+        "6": "Dimanche"
+      }
     }
   },
   "services": {
@@ -184,6 +195,58 @@
         "file_path": {
           "name": "Chemin du fichier",
           "description": "Chemin du PDF. Son répertoire doit figurer dans allowlist_external_dirs."
+        }
+      }
+    },
+    "add_manual_event": {
+      "name": "Ajouter un événement manuel",
+      "description": "Ajoute au calendrier un événement saisi à la main, ponctuel ou récurrent. Retourne l'identifiant de l'événement créé, à utiliser pour le retirer.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Calendrier",
+          "description": "Calendrier auquel ajouter l'événement. Requis si plusieurs calendriers sont configurés."
+        },
+        "summary": {
+          "name": "Titre",
+          "description": "Nom de l'événement, affiché dans le calendrier."
+        },
+        "start_date": {
+          "name": "Date de début",
+          "description": "Première journée couverte. Pour un événement ponctuel, laisser les jours de semaine vides et mettre la même date en début et en fin."
+        },
+        "end_date": {
+          "name": "Date de fin",
+          "description": "Dernière journée couverte, incluse. Pour un événement récurrent, borne jusqu'à laquelle les jours de semaine se répètent."
+        },
+        "weekdays": {
+          "name": "Jours de semaine",
+          "description": "Jours où l'événement se répète. Laisser vide pour un événement ponctuel sur la date de début."
+        },
+        "start_time": {
+          "name": "Heure de début",
+          "description": "Heure de début. Laisser vide pour un événement de journée entière. Si fournie, l'heure de fin l'est aussi."
+        },
+        "end_time": {
+          "name": "Heure de fin",
+          "description": "Heure de fin, postérieure à l'heure de début."
+        },
+        "skip_closures": {
+          "name": "Masquer les jours de fermeture",
+          "description": "Activé, retire les occurrences tombant un congé, une journée pédagogique, un jour férié ou hors de l'année scolaire. Désactiver pour un événement sans lien avec le calendrier scolaire. Sans source de calendrier, aucun jour n'est connu comme fermé et rien n'est retiré."
+        }
+      }
+    },
+    "remove_manual_event": {
+      "name": "Retirer un événement manuel",
+      "description": "Retire un événement manuel par son identifiant, celui retourné à l'ajout et listé dans les attributs du capteur d'état.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Calendrier",
+          "description": "Calendrier dont retirer l'événement. Requis si plusieurs calendriers sont configurés."
+        },
+        "event_id": {
+          "name": "Identifiant de l'événement",
+          "description": "Identifiant de l'événement manuel à retirer, retourné lors de son ajout."
         }
       }
     }
