@@ -153,9 +153,7 @@ def main() -> int:
         print("5. REGROUPEMENT DES FORMES PAR GABARIT")
         print("=" * 78)
         print("  Revele les familles de formes: contours de jour, legende, cadres.")
-        shapes = [("rect", r) for r in page.rects] + [
-            ("curve", c) for c in page.curves
-        ]
+        shapes = [("rect", r) for r in page.rects] + [("curve", c) for c in page.curves]
         families: Counter[tuple] = Counter()
         for kind, shape in shapes:
             families[
@@ -187,9 +185,9 @@ def main() -> int:
             if not inside:
                 continue
             for word in inside:
-                marked[
-                    f"x={shape['x0']:.0f} y={shape['top']:.0f} {kind}"
-                ].append(word["text"])
+                marked[f"x={shape['x0']:.0f} y={shape['top']:.0f} {kind}"].append(
+                    word["text"]
+                )
 
         print(f"  {len(marked)} forme(s) encadrent au moins un numero de jour")
         for key in sorted(marked, key=lambda k: (float(k.split("y=")[1].split()[0]))):
