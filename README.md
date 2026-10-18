@@ -305,6 +305,7 @@ développement → États**, en sélectionnant l'entité.
 | | `errors` | Message d'erreur par nom de source |
 | | `ocr_enabled` | Reflet du réglage OCR |
 | | `sources` | Liste de `id`, `name`, `url`, `type` — la clé `id` est le `source_id` attendu par `remove_source` |
+| | `manual_events` | Liste de `id`, `summary` des événements manuels — la clé `id` est l'`event_id` attendu par `remove_manual_event` |
 | `École ouverte` | `term_start`, `term_end` | Début et fin de l'année scolaire en cours, déduits du document, `null` s'il ne les annonce pas. Plusieurs années chargées ne donnent pas leur enveloppe |
 | | `reason` | `weekend`, `outside_term`, `holiday`, `pedagogical_day`, ou `null` si l'école est ouverte |
 | | `summary` | Titre du congé en cours, `null` sinon |
@@ -476,6 +477,78 @@ homeassistant:
 Lorsque plusieurs calendriers sont configurés, ajoutez `config_entry_id` pour
 désigner celui visé. Les services `add_source`, `remove_source` et `parse_pdf`
 retournent sinon une erreur explicite.
+
+### `add_manual_event`
+
+Ajoute au calendrier un événement saisi à la main, en plus des sources
+téléchargées. Utile pour ce qu'un calendrier officiel ne contient pas : un cours
+récurrent, une activité, un rendez-vous.
+
+Événement ponctuel, sur une seule journée :
+
+```yaml
+action: calendrier_scolaire_quebecois.add_manual_event
+data:
+  summary: Sortie au musée
+  start_date: "2026-10-15"
+  end_date: "2026-10-15"
+```
+
+Événement récurrent horodaté, les mardis et jeudis jusqu'à la fin de l'année :
+
+```yaml
+action: calendrier_scolaire_quebecois.add_manual_event
+data:
+  summary: Éducation physique
+  start_date: "2026-09-01"
+  end_date: "2027-06-23"
+  weekdays: [mardi, jeudi]
+  start_time: "10:00:00"
+  end_time: "11:00:00"
+response_variable: resultat
+```
+
+Les champs :
+
+| Champ | Rôle |
+|---|---|
+| `summary` | Titre affiché dans le calendrier |
+| `start_date` | Première journée. Pour un événement ponctuel, mettre la même valeur que `end_date` et laisser `weekdays` vide |
+| `end_date` | Dernière journée, **incluse** |
+| `weekdays` | Jours de répétition, par nom (`mardi`) ou indice (lundi = `0`). Vide pour un événement ponctuel |
+| `start_time`, `end_time` | Heures, les deux ensemble ou aucune. Sans elles, l'événement couvre la journée entière |
+| `skip_closures` | `true` par défaut. Masque les occurrences tombant un congé, une journée pédagogique, un jour férié ou hors de l'année scolaire |
+
+Le service **retourne l'`event_id`** de l'événement créé, à conserver pour le
+retirer. Avec `response_variable`, il est accessible dans `resultat.event_id`.
+
+#### `skip_closures` et le calendrier officiel
+
+`skip_closures` s'appuie sur les fermetures **connues du calendrier**,
+c'est-à-dire celles qu'une source a fournies. Un cours du mardi ne s'affiche
+donc pas un mardi de relâche ou de journée pédagogique annoncé par le PDF.
+Mettez-le à `false` pour un événement qui doit paraître même ces jours-là, par
+exemple une activité privée pendant la relâche.
+
+Conséquence à connaître : **sans aucune source de calendrier, aucune fermeture
+n'est connue**, donc rien n'est masqué, même avec `skip_closures` à `true`.
+L'intégration ne possède pas de liste des jours fériés québécois ; elle déduit
+les fermetures du document. Un calendrier composé uniquement d'événements
+manuels affiche donc toutes leurs occurrences.
+
+### `remove_manual_event`
+
+Retire un événement manuel par son identifiant.
+
+```yaml
+action: calendrier_scolaire_quebecois.remove_manual_event
+data:
+  event_id: a1b2c3d4e5f6
+```
+
+L'`event_id` est celui retourné par `add_manual_event`. On le retrouve aussi à
+tout moment dans l'attribut `manual_events` du capteur **État**, qui liste
+chaque règle avec son `id` et son `summary`.
 
 ## Exemples d'automatisation
 
