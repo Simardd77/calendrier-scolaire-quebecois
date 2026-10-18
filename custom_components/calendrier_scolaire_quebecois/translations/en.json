@@ -124,6 +124,17 @@
         "school_website": "School website",
         "ical": "iCalendar file"
       }
+    },
+    "weekdays": {
+      "options": {
+        "0": "Monday",
+        "1": "Tuesday",
+        "2": "Wednesday",
+        "3": "Thursday",
+        "4": "Friday",
+        "5": "Saturday",
+        "6": "Sunday"
+      }
     }
   },
   "services": {
@@ -184,6 +195,58 @@
         "file_path": {
           "name": "File path",
           "description": "Path to the PDF. Its directory must be listed in allowlist_external_dirs."
+        }
+      }
+    },
+    "add_manual_event": {
+      "name": "Add manual event",
+      "description": "Adds a hand-entered event to the calendar, one-off or recurring. Returns the identifier of the created event, used to remove it.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Calendar",
+          "description": "Calendar to add the event to. Required when several calendars are configured."
+        },
+        "summary": {
+          "name": "Title",
+          "description": "Event name, shown in the calendar."
+        },
+        "start_date": {
+          "name": "Start date",
+          "description": "First day covered. For a one-off event, leave the weekdays empty and set the same date as start and end."
+        },
+        "end_date": {
+          "name": "End date",
+          "description": "Last day covered, inclusive. For a recurring event, the bound up to which the weekdays repeat."
+        },
+        "weekdays": {
+          "name": "Weekdays",
+          "description": "Days on which the event repeats. Leave empty for a one-off event on the start date."
+        },
+        "start_time": {
+          "name": "Start time",
+          "description": "Start time. Leave empty for an all-day event. If provided, the end time must be too."
+        },
+        "end_time": {
+          "name": "End time",
+          "description": "End time, later than the start time."
+        },
+        "skip_closures": {
+          "name": "Hide on closure days",
+          "description": "When on, removes occurrences falling on a holiday, pedagogical day, public holiday or outside the school year. Turn off for an event unrelated to the school calendar. Without a calendar source, no day is known as closed and nothing is removed."
+        }
+      }
+    },
+    "remove_manual_event": {
+      "name": "Remove manual event",
+      "description": "Removes a manual event by its identifier, the one returned when it was added and listed in the status sensor attributes.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Calendar",
+          "description": "Calendar to remove the event from. Required when several calendars are configured."
+        },
+        "event_id": {
+          "name": "Event identifier",
+          "description": "Identifier of the manual event to remove, returned when it was added."
         }
       }
     }

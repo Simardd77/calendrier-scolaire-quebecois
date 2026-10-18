@@ -88,3 +88,17 @@ CONFIG_ENTRY_VERSION: Final = 1
 # Chaque entree est une regle (jours de semaine + plage + heures) developpee en
 # occurrences a chaque rafraichissement, et non une liste d'occurrences figees.
 CONF_MANUAL_EVENTS: Final = "manual_events"
+
+# Services de gestion des evenements manuels.
+SERVICE_ADD_MANUAL_EVENT: Final = "add_manual_event"
+SERVICE_REMOVE_MANUAL_EVENT: Final = "remove_manual_event"
+
+# Champs des services d'evenements manuels.
+ATTR_SUMMARY: Final = "summary"
+ATTR_START_DATE: Final = "start_date"
+ATTR_END_DATE: Final = "end_date"
+ATTR_WEEKDAYS: Final = "weekdays"
+ATTR_START_TIME: Final = "start_time"
+ATTR_END_TIME: Final = "end_time"
+ATTR_SKIP_CLOSURES: Final = "skip_closures"
+ATTR_EVENT_ID: Final = "event_id"

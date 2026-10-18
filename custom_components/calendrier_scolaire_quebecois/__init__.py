@@ -18,19 +18,30 @@ from homeassistant.helpers.typing import ConfigType
 
 from .const import (
     ATTR_CONFIG_ENTRY_ID,
+    ATTR_END_DATE,
+    ATTR_END_TIME,
+    ATTR_EVENT_ID,
     ATTR_FILE_PATH,
     ATTR_NAME,
+    ATTR_SKIP_CLOSURES,
     ATTR_SOURCE_ID,
     ATTR_SOURCE_TYPE,
     ATTR_SOURCE_URL,
+    ATTR_START_DATE,
+    ATTR_START_TIME,
+    ATTR_SUMMARY,
+    ATTR_WEEKDAYS,
     CONF_ENABLE_OCR,
+    CONF_MANUAL_EVENTS,
     CONF_SOURCES,
     DEFAULT_ENABLE_OCR,
     DOMAIN,
     PLATFORMS,
+    SERVICE_ADD_MANUAL_EVENT,
     SERVICE_ADD_SOURCE,
     SERVICE_PARSE_PDF,
     SERVICE_REFRESH_CALENDAR,
+    SERVICE_REMOVE_MANUAL_EVENT,
     SERVICE_REMOVE_SOURCE,
     SOURCE_TYPE_DIRECT_URL,
     SOURCE_TYPES,
@@ -42,7 +53,13 @@ from .coordinator import (
 )
 from .fetcher import FetchError
 from .http import SchoolCalendarIcsView
-from .models import CalendarSource, build_source_id, is_calendar_like
+from .models import (
+    CalendarSource,
+    ManualEvent,
+    build_manual_event_id,
+    build_source_id,
+    is_calendar_like,
+)
 from .parsers import ParserError
 
 _LOGGER = logging.getLogger(__name__)
@@ -77,6 +94,66 @@ SERVICE_PARSE_PDF_SCHEMA = vol.Schema(
     {
         vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string,
         vol.Required(ATTR_FILE_PATH): cv.string,
+    }
+)
+
+# Un jour de semaine est accepte comme nom (francais ou anglais, sans accent ni
+# casse) ou comme entier 0-6 (lundi=0). Le selecteur de l'interface envoie des
+# entiers; un appel ecrit a la main tolere les deux formes.
+_WEEKDAY_NAMES: dict[str, int] = {
+    "lundi": 0,
+    "monday": 0,
+    "mardi": 1,
+    "tuesday": 1,
+    "mercredi": 2,
+    "wednesday": 2,
+    "jeudi": 3,
+    "thursday": 3,
+    "vendredi": 4,
+    "friday": 4,
+    "samedi": 5,
+    "saturday": 5,
+    "dimanche": 6,
+    "sunday": 6,
+}
+
+
+def _coerce_weekday(value: object) -> int:
+    """Convertit un jour de semaine (nom ou entier) en indice 0-6."""
+    if isinstance(value, bool):  # bool est un int en Python: a exclure d'abord.
+        raise vol.Invalid("Jour de semaine invalide")
+    if isinstance(value, int):
+        if 0 <= value <= 6:
+            return value
+        raise vol.Invalid(f"Jour de semaine hors bornes: {value}")
+    if isinstance(value, str):
+        texte = value.strip().lower()
+        if texte.isdigit():
+            return _coerce_weekday(int(texte))
+        if texte in _WEEKDAY_NAMES:
+            return _WEEKDAY_NAMES[texte]
+    raise vol.Invalid(f"Jour de semaine non reconnu: {value!r}")
+
+
+SERVICE_ADD_MANUAL_EVENT_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string,
+        vol.Required(ATTR_SUMMARY): cv.string,
+        vol.Required(ATTR_START_DATE): cv.date,
+        vol.Required(ATTR_END_DATE): cv.date,
+        vol.Optional(ATTR_WEEKDAYS, default=list): vol.All(
+            cv.ensure_list, [_coerce_weekday]
+        ),
+        vol.Optional(ATTR_START_TIME): cv.time,
+        vol.Optional(ATTR_END_TIME): cv.time,
+        vol.Optional(ATTR_SKIP_CLOSURES, default=True): cv.boolean,
+    }
+)
+
+SERVICE_REMOVE_MANUAL_EVENT_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string,
+        vol.Required(ATTR_EVENT_ID): cv.string,
     }
 )
 
@@ -264,6 +341,19 @@ def _stored_sources(entry: SchoolCalendarConfigEntry) -> list[dict[str, str]]:
     return [dict(item) for item in raw if isinstance(item, dict)]
 
 
+def _stored_manual_events(entry: SchoolCalendarConfigEntry) -> list[dict]:
+    """Lit la liste des evenements manuels stockes dans une entree.
+
+    Args:
+        entry: Entree de configuration.
+
+    Returns:
+        Copie de la liste des regles manuelles.
+    """
+    raw = entry.options.get(CONF_MANUAL_EVENTS) or []
+    return [dict(item) for item in raw if isinstance(item, dict)]
+
+
 def _async_register_services(hass: HomeAssistant) -> None:
     """Declare les services du domaine s'ils ne le sont pas deja.
 
@@ -374,6 +464,64 @@ def _async_register_services(hass: HomeAssistant) -> None:
             ],
         }
 
+    async def handle_add_manual_event(call: ServiceCall) -> ServiceResponse:
+        """Ajoute un evenement manuel a une entree et retourne son identifiant."""
+        entry = _resolve_single_entry(hass, call)
+
+        weekdays = tuple(sorted(set(call.data[ATTR_WEEKDAYS])))
+        start_time = call.data.get(ATTR_START_TIME)
+        end_time = call.data.get(ATTR_END_TIME)
+
+        try:
+            rule = ManualEvent(
+                event_id=build_manual_event_id(
+                    call.data[ATTR_SUMMARY],
+                    call.data[ATTR_START_DATE],
+                    weekdays,
+                    start_time,
+                ),
+                summary=call.data[ATTR_SUMMARY],
+                start_date=call.data[ATTR_START_DATE],
+                end_date=call.data[ATTR_END_DATE],
+                weekdays=weekdays,
+                start_time=start_time,
+                end_time=end_time,
+                skip_closures=call.data[ATTR_SKIP_CLOSURES],
+            )
+        except ValueError as err:
+            raise ServiceValidationError(str(err)) from err
+
+        events = _stored_manual_events(entry)
+        if any(item.get("id") == rule.event_id for item in events):
+            raise ServiceValidationError(
+                f"Un evenement manuel identique existe deja dans '{entry.title}'"
+            )
+
+        events.append(rule.as_dict())
+        hass.config_entries.async_update_entry(
+            entry, options={**entry.options, CONF_MANUAL_EVENTS: events}
+        )
+        _LOGGER.info("Evenement manuel '%s' ajoute a '%s'", rule.summary, entry.title)
+
+        return {ATTR_EVENT_ID: rule.event_id}
+
+    async def handle_remove_manual_event(call: ServiceCall) -> None:
+        """Retire un evenement manuel d'une entree par son identifiant."""
+        entry = _resolve_single_entry(hass, call)
+        event_id = call.data[ATTR_EVENT_ID]
+        events = _stored_manual_events(entry)
+
+        remaining = [item for item in events if item.get("id") != event_id]
+        if len(remaining) == len(events):
+            raise ServiceValidationError(
+                f"Aucun evenement manuel '{event_id}' dans '{entry.title}'"
+            )
+
+        hass.config_entries.async_update_entry(
+            entry, options={**entry.options, CONF_MANUAL_EVENTS: remaining}
+        )
+        _LOGGER.info("Evenement manuel '%s' retire de '%s'", event_id, entry.title)
+
     hass.services.async_register(
         DOMAIN, SERVICE_ADD_SOURCE, handle_add_source, schema=SERVICE_ADD_SOURCE_SCHEMA
     )
@@ -395,6 +543,19 @@ def _async_register_services(hass: HomeAssistant) -> None:
         handle_parse_pdf,
         schema=SERVICE_PARSE_PDF_SCHEMA,
         supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_ADD_MANUAL_EVENT,
+        handle_add_manual_event,
+        schema=SERVICE_ADD_MANUAL_EVENT_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_REMOVE_MANUAL_EVENT,
+        handle_remove_manual_event,
+        schema=SERVICE_REMOVE_MANUAL_EVENT_SCHEMA,
     )
 
     _LOGGER.debug("Services du domaine %s enregistres", DOMAIN)
