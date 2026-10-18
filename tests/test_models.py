@@ -16,6 +16,7 @@ from custom_components.calendrier_scolaire_quebecois.models import (
     build_manual_event_id,
     build_source_id,
     expand_manual_event,
+    filter_manual_occurrences,
     clean_summary,
     deduplicate_events,
     exclude_weekends,
@@ -1205,3 +1206,128 @@ def test_expand_est_trie_par_debut():
     debuts = [e.start for e in occ]
 
     assert debuts == sorted(debuts)
+
+
+# --- filter_manual_occurrences -----------------------------------------------
+
+
+def _cours(jour: date, *, skip_closures: bool = True) -> SchoolEvent:
+    """Occurrence manuelle d'une journee, pour alleger les tests du filtre."""
+    return SchoolEvent(
+        summary="Cours",
+        start=jour,
+        end=jour + timedelta(days=1),
+        category=EventCategory.EVENT,
+        source="manuel",
+        extra={"skip_closures": "1" if skip_closures else "0"},
+    )
+
+
+def test_filter_retire_un_jour_de_fermeture():
+    """Une occurrence tombant un jour ferme est retiree."""
+    relache = date(2027, 3, 2)
+    occurrences = [_cours(date(2027, 2, 23)), _cours(relache), _cours(date(2027, 3, 9))]
+
+    conserves = filter_manual_occurrences(occurrences, frozenset({relache}))
+
+    jours = [e.first_day for e in conserves]
+    assert relache not in jours
+    assert jours == [date(2027, 2, 23), date(2027, 3, 9)]
+
+
+def test_filter_ignore_les_occurrences_sans_skip():
+    """Une occurrence a skip_closures faux reste, meme un jour ferme."""
+    relache = date(2027, 3, 2)
+    occurrences = [_cours(relache, skip_closures=False)]
+
+    conserves = filter_manual_occurrences(occurrences, frozenset({relache}))
+
+    assert len(conserves) == 1
+
+
+def test_filter_retire_hors_periode():
+    """Une occurrence avant la rentree ou apres la fin des classes est retiree."""
+    occurrences = [
+        _cours(date(2026, 7, 15)),  # ete, avant la rentree
+        _cours(date(2026, 12, 1)),  # en cours d'annee
+        _cours(date(2027, 7, 15)),  # ete, apres la fin
+    ]
+
+    conserves = filter_manual_occurrences(
+        occurrences,
+        frozenset(),
+        term_start=date(2026, 9, 1),
+        term_end=date(2027, 6, 23),
+    )
+
+    assert [e.first_day for e in conserves] == [date(2026, 12, 1)]
+
+
+def test_filter_bornes_inconnues_ne_filtrent_pas_la_periode():
+    """Sans bornes de periode, seules les fermetures ponctuelles s'appliquent."""
+    occurrences = [_cours(date(2026, 7, 15)), _cours(date(2026, 12, 1))]
+
+    conserves = filter_manual_occurrences(occurrences, frozenset())
+
+    assert len(conserves) == 2  # l'ete n'est pas filtre faute de bornes
+
+
+def test_filter_conserve_les_bornes_de_periode():
+    """Les journees egales a term_start et term_end sont conservees."""
+    occurrences = [_cours(date(2026, 9, 1)), _cours(date(2027, 6, 23))]
+
+    conserves = filter_manual_occurrences(
+        occurrences,
+        frozenset(),
+        term_start=date(2026, 9, 1),
+        term_end=date(2027, 6, 23),
+    )
+
+    assert len(conserves) == 2
+
+
+def test_filter_horodate_teste_la_journee_pas_l_heure():
+    """Une occurrence horodatee un jour ferme est retiree quelle que soit l'heure."""
+    tz = timezone(timedelta(hours=-5))
+    relache = date(2027, 3, 2)
+    occ = SchoolEvent(
+        summary="Cours",
+        start=datetime(2027, 3, 2, 10, 0, tzinfo=tz),
+        end=datetime(2027, 3, 2, 11, 0, tzinfo=tz),
+        category=EventCategory.EVENT,
+        source="manuel",
+        extra={"skip_closures": "1"},
+    )
+
+    conserves = filter_manual_occurrences([occ], frozenset({relache}))
+
+    assert conserves == []
+
+
+def test_filter_preserve_l_ordre():
+    """Les occurrences conservees gardent leur ordre d'origine."""
+    occurrences = [_cours(date(2026, 9, d)) for d in (1, 8, 15, 22)]
+
+    conserves = filter_manual_occurrences(occurrences, frozenset({date(2026, 9, 8)}))
+
+    assert [e.first_day for e in conserves] == [
+        date(2026, 9, 1),
+        date(2026, 9, 15),
+        date(2026, 9, 22),
+    ]
+
+
+def test_filter_chaine_apres_expansion():
+    """L'expansion puis le filtrage donnent le bon resultat de bout en bout."""
+    rule = ManualEvent(
+        event_id="x",
+        summary="Education physique",
+        start_date=date(2027, 2, 23),  # mardi
+        end_date=date(2027, 3, 9),  # mardi
+        weekdays=(1,),  # mardi
+    )
+    occurrences = expand_manual_event(rule)
+    # Mardi 2 mars tombe dans la semaine de relache.
+    conserves = filter_manual_occurrences(occurrences, frozenset({date(2027, 3, 2)}))
+
+    assert [e.first_day for e in conserves] == [date(2027, 2, 23), date(2027, 3, 9)]

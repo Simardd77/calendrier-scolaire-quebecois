@@ -682,8 +682,66 @@ def _build_manual_occurrence(
         end=end,
         category=EventCategory.EVENT,
         source=MANUAL_EVENT_SOURCE,
-        extra={"manual_event_id": rule.event_id},
+        extra={
+            "manual_event_id": rule.event_id,
+            # Chaque occurrence porte le drapeau, pour que le filtrage des jours
+            # de fermeture soit autonome, sans relire la regle d'origine.
+            "skip_closures": "1" if rule.skip_closures else "0",
+        },
     )
+
+
+def filter_manual_occurrences(
+    occurrences: list[SchoolEvent],
+    closed_days: frozenset[date],
+    term_start: date | None = None,
+    term_end: date | None = None,
+) -> list[SchoolEvent]:
+    """Retire les occurrences manuelles tombant un jour de fermeture scolaire.
+
+    N'agit que sur les occurrences dont le drapeau ``skip_closures`` est vrai,
+    lu dans ``extra``. Les autres traversent la fonction intactes, de meme que
+    tout evenement qui ne serait pas d'origine manuelle.
+
+    Une occurrence concernee est retiree quand sa journee est:
+
+    - dans ``closed_days`` (conge, journee pedagogique, jour ferie), ou
+    - hors de la periode scolaire, lorsque les bornes sont connues: avant
+      ``term_start`` ou apres ``term_end``. Une borne a ``None`` est ignoree,
+      faute d'information on ne presume aucune fermeture de ce cote.
+
+    Le test porte sur la journee (``first_day``), jamais sur l'heure: un cours de
+    10 h un jour de relache est retire quelle que soit son heure.
+
+    Args:
+        occurrences: Occurrences a filtrer, typiquement issues de
+            ``expand_manual_event``.
+        closed_days: Jours de fermeture ponctuelle, pre-calcules une seule fois
+            par l'appelant pour un test en temps constant.
+        term_start: Premiere journee de l'annee scolaire, ou None si inconnue.
+        term_end: Derniere journee de l'annee scolaire, ou None si inconnue.
+
+    Returns:
+        Occurrences conservees, dans leur ordre d'origine.
+    """
+    conserves: list[SchoolEvent] = []
+
+    for event in occurrences:
+        if event.extra.get("skip_closures") != "1":
+            conserves.append(event)
+            continue
+
+        jour = event.first_day
+        if jour in closed_days:
+            continue
+        if term_start is not None and jour < term_start:
+            continue
+        if term_end is not None and jour > term_end:
+            continue
+
+        conserves.append(event)
+
+    return conserves
 
 
 def deduplicate_events(events: list[SchoolEvent]) -> list[SchoolEvent]:
