@@ -572,10 +572,18 @@ class SchoolEvent:
 
     @property
     def uid(self) -> str:
-        """Identifiant stable de l'evenement."""
+        """Identifiant stable de l'evenement.
+
+        L'heure entre dans l'identifiant pour les evenements horodates: deux
+        evenements de meme titre et meme journee mais a des heures differentes
+        (par exemple deux cours manuels le meme mardi) doivent avoir des UID
+        distincts, sans quoi un client iCalendar les confondrait. Les evenements
+        de journee entiere n'ont pas d'heure: leur UID est inchange.
+        """
         from hashlib import sha1
 
-        raw = f"{self.summary}|{self.first_day}|{self.last_day}|{self.source}"
+        heure = self.start.strftime("%H:%M") if isinstance(self.start, datetime) else ""
+        raw = f"{self.summary}|{self.first_day}|{self.last_day}|{heure}|{self.source}"
         return sha1(normalize_text(raw).encode("utf-8")).hexdigest()[:16]
 
 

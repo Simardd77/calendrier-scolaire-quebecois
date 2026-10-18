@@ -229,6 +229,52 @@ def test_uid_est_deterministe():
     assert premier.uid != _jour(2024, 9, 4).uid
 
 
+def test_uid_distingue_deux_horaires_le_meme_jour():
+    """Deux evenements horodates identiques sauf l'heure ont des UID distincts.
+
+    Cas d'un evenement manuel: deux cours le meme mardi, a 10h et a 14h, meme
+    titre. Sans l'heure dans le UID, un client iCalendar les confondrait.
+    """
+    tz = timezone(timedelta(hours=-5))
+    jour = date(2026, 9, 8)
+    matin = SchoolEvent(
+        summary="Cours",
+        start=datetime(2026, 9, 8, 10, 0, tzinfo=tz),
+        end=datetime(2026, 9, 8, 11, 0, tzinfo=tz),
+    )
+    apres_midi = SchoolEvent(
+        summary="Cours",
+        start=datetime(2026, 9, 8, 14, 0, tzinfo=tz),
+        end=datetime(2026, 9, 8, 15, 0, tzinfo=tz),
+    )
+
+    assert matin.uid != apres_midi.uid
+    assert jour == matin.first_day == apres_midi.first_day
+
+
+def test_uid_journee_entiere_ignore_l_heure():
+    """Un evenement de journee entiere n'a pas d'heure: son UID est stable.
+
+    Garantit que l'ajout de l'heure au UID ne change rien pour les evenements
+    issus des PDF, qui sont tous des journees entieres.
+    """
+    debut = date(2026, 12, 23)
+    conge = SchoolEvent(
+        summary="Conge des fetes",
+        start=debut,
+        end=debut + timedelta(days=1),
+        category=EventCategory.HOLIDAY,
+    )
+    identique = SchoolEvent(
+        summary="Conge des fetes",
+        start=debut,
+        end=debut + timedelta(days=1),
+        category=EventCategory.HOLIDAY,
+    )
+
+    assert conge.uid == identique.uid
+
+
 # --- deduplicate_events -----------------------------------------------------
 
 
