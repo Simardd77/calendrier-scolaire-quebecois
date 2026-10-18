@@ -290,12 +290,12 @@ jobs:
           done <<< "${COMMITS}"
 
           LOG=""
-          [[ -n "${FEATS}" ]]  && LOG="${LOG}## 🚀 Features\n${FEATS}\n"
-          [[ -n "${FIXES}" ]]  && LOG="${LOG}## 🐛 Bug Fixes\n${FIXES}\n"
+          [[ -n "${FEATS}" ]]  && LOG="${LOG}## 🚀 Nouveautés\n${FEATS}\n"
+          [[ -n "${FIXES}" ]]  && LOG="${LOG}## 🐛 Corrections\n${FIXES}\n"
           [[ -n "${DOCS}" ]]   && LOG="${LOG}## 📝 Documentation\n${DOCS}\n"
-          [[ -n "${CI}" ]]     && LOG="${LOG}## 📦 CI/CD\n${CI}\n"
-          [[ -n "${CHORES}" ]] && LOG="${LOG}## 🧹 Chores\n${CHORES}\n"
-          [[ -n "${OTHER}" ]]  && LOG="${LOG}## 📌 Other\n${OTHER}\n"
+          [[ -n "${CI}" ]]     && LOG="${LOG}## 📦 Intégration continue\n${CI}\n"
+          [[ -n "${CHORES}" ]] && LOG="${LOG}## 🧹 Maintenance\n${CHORES}\n"
+          [[ -n "${OTHER}" ]]  && LOG="${LOG}## 📌 Autres\n${OTHER}\n"
 
           {
             echo "CHANGELOG<<CHANGELOG_EOF"
@@ -323,7 +323,7 @@ jobs:
           tag_name: ${{ steps.version.outputs.TAG_NAME }}
           name: "Calendrier Scolaire Québécois ${{ steps.version.outputs.TAG_NAME }}"
           body: |
-            ## What's Changed
+            ## Changements
             ${{ steps.changelog.outputs.CHANGELOG }}
 
             ## Installation
