@@ -15,6 +15,7 @@ from homeassistant.core import (
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
+from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from .const import (
     ATTR_CONFIG_ENTRY_ID,
@@ -234,15 +235,33 @@ async def async_unload_entry(
 async def _async_update_listener(
     hass: HomeAssistant, entry: SchoolCalendarConfigEntry
 ) -> None:
-    """Recharge l'entree lorsque ses options changent.
+    """Applique une modification de l'entree.
 
-    Le rechargement est delegue a Home Assistant plutot que reimplemente par un
-    enchainement decharger/configurer, qui laissait un coordinateur orphelin.
+    Quand seuls les evenements manuels changent, le calendrier est recalcule a
+    partir des sources deja telechargees. Un rechargement complet retelechargerait
+    les PDF et rendrait l'entite indisponible pendant ce temps: la vue des
+    calendriers, qui redemande ses evenements des qu'elle vient d'ajouter ou de
+    supprimer un evenement, recevrait alors une erreur.
+
+    Toute autre modification (sources, reglages, secret du flux, titre) recharge
+    l'entree. Le rechargement est delegue a Home Assistant plutot que reimplemente
+    par un enchainement decharger/configurer, qui laissait un coordinateur
+    orphelin.
 
     Args:
         hass: Instance Home Assistant.
         entry: Entree modifiee.
     """
+    coordinator = getattr(entry, "runtime_data", None)
+    if coordinator is not None and coordinator.only_manual_events_changed:
+        try:
+            coordinator.async_rebuild_from_snapshot()
+        except UpdateFailed:
+            # Plus aucun evenement manuel et toutes les sources en echec: un
+            # rechargement relance les telechargements.
+            _LOGGER.debug("Recalcul impossible pour '%s', rechargement", entry.title)
+        else:
+            return
     await hass.config_entries.async_reload(entry.entry_id)
 
 
