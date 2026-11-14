@@ -12,12 +12,16 @@ d'Apple, et sont la source des erreurs les plus courantes:
 - les caracteres ``\\``, ``;``, ``,`` et les retours a la ligne doivent etre
   echappes dans les valeurs textuelles, et toute ligne depassant 75 octets doit
   etre pliee. Une virgule non echappee dans un titre coupe la propriete en deux
-  et corrompt l'evenement.
+  et corrompt l'evenement;
+- un evenement horodate ecrit en UTC (suffixe ``Z``) fait afficher « GMT » dans
+  Calendrier d'Apple. Quand le fuseau local est connu, l'heure est donc publiee
+  en heure locale « flottante », sans suffixe ni fuseau: l'application l'affiche
+  telle quelle, sans ligne de fuseau horaire.
 """
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, tzinfo
 
 from .models import SchoolEvent
 
@@ -101,12 +105,21 @@ def _format_datetime(value: datetime) -> str:
     return value.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
-def _event_lines(event: SchoolEvent, dtstamp: str) -> list[str]:
+def _format_local_datetime(value: datetime, tz: tzinfo) -> str:
+    """Formate un horodatage en heure locale flottante (sans suffixe Z)."""
+    return value.astimezone(tz).strftime("%Y%m%dT%H%M%S")
+
+
+def _event_lines(
+    event: SchoolEvent, dtstamp: str, tz: tzinfo | None = None
+) -> list[str]:
     """Construit les proprietes d'un evenement.
 
     Args:
         event: Evenement a serialiser.
         dtstamp: Horodatage de generation du flux.
+        tz: Fuseau local. Si fourni, les heures sont publiees en heure locale
+            flottante; sinon en UTC.
 
     Returns:
         Lignes de la composante VEVENT, avant pliage.
@@ -125,8 +138,12 @@ def _event_lines(event: SchoolEvent, dtstamp: str) -> list[str]:
         # l'utilisateur comme occupe.
         lines.append("TRANSP:TRANSPARENT")
     else:
-        lines.append(f"DTSTART:{_format_datetime(event.start)}")
-        lines.append(f"DTEND:{_format_datetime(event.end)}")
+        if tz is None:
+            lines.append(f"DTSTART:{_format_datetime(event.start)}")
+            lines.append(f"DTEND:{_format_datetime(event.end)}")
+        else:
+            lines.append(f"DTSTART:{_format_local_datetime(event.start, tz)}")
+            lines.append(f"DTEND:{_format_local_datetime(event.end, tz)}")
 
     lines.append(f"SUMMARY:{escape_text(event.summary)}")
     lines.append(f"CATEGORIES:{escape_text(event.category.value)}")
@@ -146,6 +163,7 @@ def build_ics(
     *,
     now: datetime | None = None,
     refresh_hint: str = DEFAULT_REFRESH_HINT,
+    tz: tzinfo | None = None,
 ) -> str:
     """Serialise un calendrier complet.
 
@@ -155,6 +173,9 @@ def build_ics(
         now: Horodatage de generation. Par defaut, l'instant courant en UTC.
             Parametrable pour rendre la sortie reproductible en test.
         refresh_hint: Duree ISO 8601 suggeree entre deux rafraichissements.
+        tz: Fuseau local. Si fourni, les evenements horodates sont publies
+            en heure locale flottante, sans « GMT » dans le client. Sans
+            fuseau, ils sont publies en UTC.
 
     Returns:
         Flux iCalendar complet, lignes terminees par CRLF.
@@ -175,7 +196,7 @@ def build_ics(
     ]
 
     for event in events:
-        lines.extend(_event_lines(event, dtstamp))
+        lines.extend(_event_lines(event, dtstamp, tz))
 
     lines.append("END:VCALENDAR")
 

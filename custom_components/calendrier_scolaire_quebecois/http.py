@@ -20,6 +20,7 @@ from http import HTTPStatus
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 
 from .const import CONF_FEED_SECRET, CONTENT_TYPE_ICS, DOMAIN, ICS_URL_PREFIX
 from .ics import build_ics
@@ -90,7 +91,8 @@ class SchoolCalendarIcsView(HomeAssistantView):
 
         # Un calendrier vide reste un flux valide: l'abonnement se cree et se
         # remplira au prochain cycle, plutot que d'echouer chez le client.
-        body = build_ics(entry.title, events)
+        # Heure locale flottante: iCloud n'affiche alors pas de ligne « GMT ».
+        body = build_ics(entry.title, events, tz=dt_util.get_default_time_zone())
 
         _LOGGER.debug(
             "Flux iCalendar servi pour '%s' (%d evenement(s))",

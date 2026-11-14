@@ -416,6 +416,12 @@ sont marqués `TRANSP:TRANSPARENT`, donc ils ne vous font pas apparaître comme
 occupé. Chaque événement porte sa catégorie dans `CATEGORIES`, ce qui permet un
 filtrage côté client.
 
+Les événements avec une heure, comme un événement manuel de 10 h à 11 h, sont
+publiés en **heure locale**, selon le fuseau horaire configuré dans Home
+Assistant, sans suffixe `Z` ni fuseau. Calendrier d'Apple les affiche tels quels,
+sans ligne « GMT ». Un abonné situé dans un autre fuseau voit donc la même heure
+sur sa montre, pas l'heure convertie.
+
 ### Qu'est-ce qui ferait changer l'adresse
 
 | Action | Effet |
