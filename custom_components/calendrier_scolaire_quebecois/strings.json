@@ -37,9 +37,10 @@
           "settings": "Modifier les réglages",
           "add_source": "Ajouter une source",
           "remove_source": "Retirer des sources",
-          "feed": "Publier vers un agenda externe",
           "add_manual_event": "Ajouter un événement manuel",
-          "remove_manual_event": "Retirer des événements manuels"
+          "edit_manual_event": "Modifier un événement manuel",
+          "remove_manual_event": "Retirer des événements manuels",
+          "feed": "Publier vers un agenda externe"
         }
       },
       "feed": {
@@ -96,6 +97,30 @@
         "description": "Sélectionnez les événements à retirer.",
         "data": {
           "manual_events": "Événements"
+        }
+      },
+      "edit_manual_event": {
+        "title": "Modifier un événement manuel",
+        "description": "Sélectionnez l'événement à modifier.",
+        "data": {
+          "manual_event": "Événement"
+        }
+      },
+      "update_manual_event": {
+        "title": "Modifier l'événement manuel",
+        "description": "Un identifiant est dérivé du titre, de la date de début, des jours et de l'heure de début : modifier l'un d'eux change l'identifiant de l'événement.",
+        "data": {
+          "summary": "Titre",
+          "start_date": "Date de début",
+          "end_date": "Date de fin (incluse)",
+          "weekdays": "Jours de semaine",
+          "start_time": "Heure de début",
+          "end_time": "Heure de fin",
+          "skip_closures": "Ignorer les jours de fermeture"
+        },
+        "data_description": {
+          "end_date": "Facultative pour un événement ponctuel.",
+          "skip_closures": "Retire les occurrences tombant un congé, une journée pédagogique, un férié ou hors de l'année scolaire."
         }
       }
     },

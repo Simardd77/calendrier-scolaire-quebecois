@@ -37,9 +37,10 @@
           "settings": "Change settings",
           "add_source": "Add a source",
           "remove_source": "Remove sources",
-          "feed": "Publish to an external calendar app",
           "add_manual_event": "Add a manual event",
-          "remove_manual_event": "Remove manual events"
+          "edit_manual_event": "Edit a manual event",
+          "remove_manual_event": "Remove manual events",
+          "feed": "Publish to an external calendar app"
         }
       },
       "feed": {
@@ -96,6 +97,30 @@
         "description": "Select the events to remove.",
         "data": {
           "manual_events": "Events"
+        }
+      },
+      "edit_manual_event": {
+        "title": "Edit a manual event",
+        "description": "Select the event to edit.",
+        "data": {
+          "manual_event": "Event"
+        }
+      },
+      "update_manual_event": {
+        "title": "Edit the manual event",
+        "description": "The identifier is derived from the title, start date, weekdays and start time: changing any of them changes the event's identifier.",
+        "data": {
+          "summary": "Title",
+          "start_date": "Start date",
+          "end_date": "End date (inclusive)",
+          "weekdays": "Weekdays",
+          "start_time": "Start time",
+          "end_time": "End time",
+          "skip_closures": "Skip closure days"
+        },
+        "data_description": {
+          "end_date": "Optional for a one-off event.",
+          "skip_closures": "Drops occurrences that fall on a holiday, pedagogical day, public holiday or outside the school year."
         }
       }
     },
