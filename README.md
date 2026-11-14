@@ -481,6 +481,37 @@ Lorsque plusieurs calendriers sont configurés, ajoutez `config_entry_id` pour
 désigner celui visé. Les services `add_source`, `remove_source` et `parse_pdf`
 retournent sinon une erreur explicite.
 
+### Ajouter un événement depuis la vue des calendriers
+
+Le bouton d'ajout de la vue des calendriers de Home Assistant crée un événement
+manuel, comme le service `add_manual_event`. Il est enregistré dans les options
+de l'intégration, avec `skip_closures` actif : le formulaire natif n'offre pas ce
+choix. Pour un événement qui doit tomber un jour de fermeture, utilisez
+**Configurer** ou le service.
+
+Exemple : un événement de 14 h à 15 h, répété chaque semaine le lundi, avec une
+fin de répétition au 30 novembre.
+
+| Ce que le formulaire accepte | Traduction |
+|---|---|
+| Un événement ponctuel, journée entière ou avec heures | Un jour, sans jour de semaine |
+| Répétition **hebdomadaire**, avec ou sans choix de jours | Jours de semaine sur une plage de dates |
+| Répétition **quotidienne** | Les sept jours de la semaine |
+| Fin par **date** ou par **nombre de fois** | Date de fin de la plage |
+
+Sont refusés, avec un message dans l'interface :
+
+- une répétition **sans fin** : indiquez une date ou un nombre de fois ;
+- une répétition **mensuelle ou annuelle**, « une semaine sur deux » ou « le 3e
+  lundi du mois » ;
+- un événement de **plusieurs jours**, avec ou sans heures : utilisez une
+  répétition hebdomadaire sur la plage voulue ;
+- une **description** ou un **lieu**, que les événements manuels ne conservent
+  pas.
+
+Les heures sont lues dans le fuseau horaire configuré dans Home Assistant. Une
+fin de répétition par date est inclusive.
+
 ### `add_manual_event`
 
 Ajoute au calendrier un événement saisi à la main, en plus des sources
@@ -790,9 +821,12 @@ Ouvrez l'adresse du flux dans un navigateur : le code renvoyé indique la cause.
 - Un calendrier en grille dont les formes ne sont pas des objets vectoriels,
   parce qu'il s'agit d'une image, nécessiterait de la reconnaissance de formes
   que l'OCR ne fournit pas.
-- Le calendrier est en lecture seule : la création d'événements depuis Home
-  Assistant n'est pas prise en charge, puisque chaque rafraîchissement
-  reconstruit les événements à partir des sources.
+- Depuis la vue des calendriers de Home Assistant, on peut **ajouter** un
+  événement, mais pas le modifier ni le supprimer : ces deux actions passent par
+  **Configurer** (voir *Gérer les sources après l'installation*) ou par le
+  service `remove_manual_event`. Les répétitions autres que des jours de
+  semaine sur une plage de dates sont refusées (voir *Ajouter un événement
+  depuis la vue des calendriers*).
 - Le flux iCalendar publié n'est pas authentifié par un jeton, l'autorisation
   reposant sur un secret contenu dans l'adresse. C'est une contrainte des
   applications d'agenda, qui ne savent pas s'authentifier auprès de Home
@@ -828,6 +862,7 @@ coordinator.py      cycle de rafraîchissement, CalendarData
 | `models.py` | Modèle d'événement et règles métier | non |
 | `parsers/` | Extraction depuis PDF, iCalendar, HTML | non |
 | `ics.py` | Sérialisation RFC 5545 du flux publié | non |
+| `manual_rule.py` | Traduction d'un événement de la vue des calendriers (dont sa `RRULE`) en événement manuel | non |
 | `fetcher.py` | Téléchargement et découverte de documents | non |
 | `coordinator.py` | Orchestration des cycles de mise à jour | oui |
 | `config_flow.py` | Configuration et options | oui |
