@@ -18,7 +18,11 @@ from homeassistant.util import dt as dt_util
 
 from .coordinator import SchoolCalendarConfigEntry, SchoolCalendarCoordinator
 from .entity import SchoolCalendarBaseEntity
-from .manual_rule import add_manual_rule, manual_event_from_calendar
+from .manual_rule import (
+    add_manual_rule,
+    delete_manual_occurrence,
+    manual_event_from_calendar,
+)
 from .models import SchoolEvent
 
 _LOGGER = logging.getLogger(__name__)
@@ -52,13 +56,16 @@ def _to_calendar_event(event: SchoolEvent) -> CalendarEvent:
     Returns:
         Evenement au format attendu par le composant calendrier.
     """
+    manual_id = event.extra.get("manual_event_id")
     return CalendarEvent(
         summary=event.summary,
         start=event.start,
         end=event.end,
         description=event.description or None,
         location=event.location or None,
-        uid=event.uid,
+        uid=manual_id or event.uid,
+        recurrence_id=event.extra.get("manual_recurrence_id") or None,
+        rrule=event.extra.get("manual_rrule") or None,
     )
 
 
@@ -68,9 +75,11 @@ class QuebecSchoolCalendarEntity(SchoolCalendarBaseEntity, CalendarEntity):
     # L'entite principale d'un appareil porte le nom de l'appareil.
     _attr_name = None
 
-    # Active le bouton d'ajout de la vue des calendriers. Seule la creation est
-    # prise en charge: la modification et le retrait passent par les options.
-    _attr_supported_features = CalendarEntityFeature.CREATE_EVENT
+    # Active l'ajout et la suppression depuis la vue des calendriers. La
+    # modification passe par les options de l'integration.
+    _attr_supported_features = (
+        CalendarEntityFeature.CREATE_EVENT | CalendarEntityFeature.DELETE_EVENT
+    )
 
     def __init__(self, coordinator: SchoolCalendarCoordinator) -> None:
         """Initialise l'entite calendrier.
@@ -157,6 +166,41 @@ class QuebecSchoolCalendarEntity(SchoolCalendarBaseEntity, CalendarEntity):
         _LOGGER.info(
             "Evenement manuel '%s' cree depuis le calendrier '%s'",
             rule.summary,
+            entry.title,
+        )
+
+    async def async_delete_event(
+        self,
+        uid: str,
+        recurrence_id: str | None = None,
+        recurrence_range: str | None = None,
+    ) -> None:
+        """Supprime un evenement manuel, une occurrence ou la fin d'une serie.
+
+        Seuls les evenements manuels se suppriment: ceux du calendrier officiel
+        viennent d'une source, rechargee a chaque cycle.
+
+        Args:
+            uid: Identifiant de la regle manuelle.
+            recurrence_id: Journee de l'occurrence visee (``AAAA-MM-JJ``).
+            recurrence_range: ``THISANDFUTURE`` pour « celui-ci et les
+                suivants », sinon None.
+
+        Raises:
+            ServiceValidationError: Si l'evenement n'est pas supprimable. Le
+                message est affiche a l'utilisateur.
+        """
+        entry = self.coordinator.config_entry
+        try:
+            options = delete_manual_occurrence(
+                entry.options, uid, recurrence_id, recurrence_range
+            )
+        except ValueError as err:
+            raise ServiceValidationError(str(err)) from err
+        self.hass.config_entries.async_update_entry(entry, options=options)
+        _LOGGER.info(
+            "Evenement manuel '%s' supprime depuis le calendrier '%s'",
+            uid,
             entry.title,
         )
 

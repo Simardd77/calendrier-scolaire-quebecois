@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from datetime import date, time
 from typing import Any
 
@@ -470,6 +471,7 @@ class CalendrierScolaireQuebecoisOptionsFlow(OptionsFlow):
             ):
                 errors["base"] = "manual_event_exists"
             else:
+                rule = _keep_excluded_dates(rule, current)
                 updated = [
                     rule.as_dict() if item is current else item for item in events
                 ]
@@ -623,6 +625,21 @@ def _build_manual_rule(
     except ValueError:
         return None, "manual_event_invalid"
     return rule, None
+
+
+def _keep_excluded_dates(rule: ManualEvent, stored: dict[str, Any]) -> ManualEvent:
+    """Reporte sur la regle modifiee les journees deja retirees une a une.
+
+    Le formulaire ne les montre pas: sans ce report, modifier un evenement
+    ferait reapparaitre les occurrences supprimees depuis la vue des calendriers.
+    Celles qui tombent hors de la nouvelle plage sont abandonnees.
+    """
+    try:
+        previous = ManualEvent.from_dict(stored).excluded_dates
+    except ValueError:
+        return rule
+    kept = tuple(day for day in previous if rule.start_date <= day <= rule.end_date)
+    return replace(rule, excluded_dates=kept) if kept else rule
 
 
 def _form_values(item: dict[str, Any]) -> dict[str, Any]:
