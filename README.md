@@ -121,13 +121,16 @@ L'intégration se configure entièrement par l'interface. La configuration par
 
 ### Gérer les sources après l'installation
 
-**Configurer** sur la carte de l'intégration ouvre un menu à quatre entrées :
+**Configurer** sur la carte de l'intégration ouvre un menu à sept entrées :
 
 | Entrée | Rôle |
 |---|---|
 | **Modifier les réglages** | Intervalle de rafraîchissement et OCR |
 | **Ajouter une source** | Même formulaire que l'installation, équivalent du service `add_source` |
 | **Retirer des sources** | Sélection dans la liste des sources configurées, sans avoir à connaître leur identifiant |
+| **Ajouter un événement manuel** | Titre, dates, jours de semaine et heures, équivalent du service `add_manual_event` |
+| **Modifier un événement manuel** | Choix dans la liste, puis formulaire prérempli. L'identifiant dérive du titre, de la date de début, des jours et de l'heure de début, et change donc si l'un d'eux est modifié |
+| **Retirer des événements manuels** | Sélection dans la liste des événements saisis, équivalent du service `remove_manual_event` |
 | **Publier vers un agenda externe** | Adresse du flux iCalendar et renouvellement du secret |
 
 Passer par **Retirer des sources** est la voie la plus simple pour en supprimer

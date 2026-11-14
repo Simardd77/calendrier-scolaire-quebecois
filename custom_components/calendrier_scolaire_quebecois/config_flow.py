@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import date, time
 from typing import Any
 
 import voluptuous as vol
@@ -13,12 +14,14 @@ from homeassistant.config_entries import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import selector
 from homeassistant.helpers.network import NoURLAvailableError, get_url
 
 from .const import (
     ATTR_NAME,
     CONF_ENABLE_OCR,
     CONF_FEED_SECRET,
+    CONF_MANUAL_EVENTS,
     CONF_REFRESH_INTERVAL,
     CONF_SOURCES,
     CONFIG_ENTRY_VERSION,
@@ -36,6 +39,8 @@ from .coordinator import async_probe_source
 from .fetcher import FetchError
 from .models import (
     CalendarSource,
+    ManualEvent,
+    build_manual_event_id,
     build_source_id,
     generate_feed_secret,
     is_calendar_like,
@@ -169,7 +174,15 @@ class CalendrierScolaireQuebecoisOptionsFlow(OptionsFlow):
         """
         return self.async_show_menu(
             step_id="init",
-            menu_options=["settings", "add_source", "remove_source", "feed"],
+            menu_options=[
+                "settings",
+                "add_source",
+                "remove_source",
+                "add_manual_event",
+                "edit_manual_event",
+                "remove_manual_event",
+                "feed",
+            ],
         )
 
     async def async_step_feed(
@@ -356,6 +369,149 @@ class CalendrierScolaireQuebecoisOptionsFlow(OptionsFlow):
 
         return self.async_show_form(step_id="remove_source", data_schema=schema)
 
+    async def async_step_add_manual_event(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Ajoute un evenement saisi a la main, ponctuel ou recurrent.
+
+        Args:
+            user_input: Donnees saisies, ou None au premier affichage.
+
+        Returns:
+            Formulaire a afficher ou options enregistrees.
+        """
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            rule, error = _build_manual_rule(user_input)
+            events = self._manual_events
+            if error:
+                errors["base"] = error
+            elif any(item.get("id") == rule.event_id for item in events):
+                errors["base"] = "manual_event_exists"
+            else:
+                events.append(rule.as_dict())
+                return self._save({**self._options, CONF_MANUAL_EVENTS: events})
+        return self.async_show_form(
+            step_id="add_manual_event",
+            data_schema=self.add_suggested_values_to_schema(
+                _MANUAL_EVENT_SCHEMA, user_input
+            ),
+            errors=errors,
+        )
+
+    async def async_step_edit_manual_event(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Choisit l'evenement manuel a modifier.
+
+        Args:
+            user_input: Donnees saisies, ou None au premier affichage.
+
+        Returns:
+            Liste de choix, abandon si aucun evenement, ou formulaire de
+            modification de l'evenement choisi.
+        """
+        events = self._manual_events
+        if not events:
+            return self.async_abort(reason="no_manual_events")
+        if user_input is not None:
+            chosen = user_input["manual_event"]
+            if any(item.get("id") == chosen for item in events):
+                self._editing_manual_id = chosen
+                return await self.async_step_update_manual_event()
+        options = [
+            selector.SelectOptionDict(
+                value=item["id"], label=_describe_manual_event(item)
+            )
+            for item in events
+            if item.get("id")
+        ]
+        schema = vol.Schema(
+            {
+                vol.Required("manual_event"): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=options, mode=selector.SelectSelectorMode.LIST
+                    )
+                )
+            }
+        )
+        return self.async_show_form(step_id="edit_manual_event", data_schema=schema)
+
+    async def async_step_update_manual_event(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Modifie l'evenement manuel choisi, formulaire prerempli.
+
+        L'identifiant derive du contenu de la regle (titre, premiere date, jours,
+        heure de debut): il est donc recalcule, et l'ancien disparait. Une
+        modification qui reproduit un autre evenement existant est refusee.
+
+        Args:
+            user_input: Donnees saisies, ou None au premier affichage.
+
+        Returns:
+            Formulaire a afficher ou options enregistrees.
+        """
+        events = self._manual_events
+        current = next(
+            (item for item in events if item.get("id") == self._editing_manual_id),
+            None,
+        )
+        if current is None:
+            return self.async_abort(reason="no_manual_events")
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            rule, error = _build_manual_rule(user_input)
+            if error:
+                errors["base"] = error
+            elif any(
+                item.get("id") == rule.event_id and item is not current
+                for item in events
+            ):
+                errors["base"] = "manual_event_exists"
+            else:
+                updated = [
+                    rule.as_dict() if item is current else item for item in events
+                ]
+                return self._save({**self._options, CONF_MANUAL_EVENTS: updated})
+        suggested = user_input if user_input is not None else _form_values(current)
+        return self.async_show_form(
+            step_id="update_manual_event",
+            data_schema=self.add_suggested_values_to_schema(
+                _MANUAL_EVENT_SCHEMA, suggested
+            ),
+            errors=errors,
+        )
+
+    async def async_step_remove_manual_event(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Retire un ou plusieurs evenements manuels.
+
+        Args:
+            user_input: Donnees saisies, ou None au premier affichage.
+
+        Returns:
+            Formulaire a afficher, abandon si aucun evenement, ou options
+            enregistrees.
+        """
+        events = self._manual_events
+        if not events:
+            return self.async_abort(reason="no_manual_events")
+        if user_input is not None:
+            to_remove = set(user_input.get("manual_events", []))
+            remaining = [item for item in events if item.get("id") not in to_remove]
+            return self._save({**self._options, CONF_MANUAL_EVENTS: remaining})
+        choices = {
+            item["id"]: _describe_manual_event(item)
+            for item in events
+            if item.get("id")
+        }
+        schema = vol.Schema(
+            {vol.Required("manual_events", default=[]): cv.multi_select(choices)}
+        )
+        return self.async_show_form(step_id="remove_manual_event", data_schema=schema)
+
     # --- Utilitaires ---------------------------------------------------------
 
     @property
@@ -367,6 +523,14 @@ class CalendrierScolaireQuebecoisOptionsFlow(OptionsFlow):
     def _sources(self) -> list[dict[str, str]]:
         """Copie modifiable de la liste des sources."""
         raw = self.config_entry.options.get(CONF_SOURCES) or []
+        return [dict(item) for item in raw if isinstance(item, dict)]
+
+    _editing_manual_id: str | None = None
+
+    @property
+    def _manual_events(self) -> list[dict[str, Any]]:
+        """Copie modifiable de la liste des evenements manuels."""
+        raw = self.config_entry.options.get(CONF_MANUAL_EVENTS) or []
         return [dict(item) for item in raw if isinstance(item, dict)]
 
     def _save(self, options: dict[str, Any]) -> ConfigFlowResult:
@@ -382,6 +546,120 @@ class CalendrierScolaireQuebecoisOptionsFlow(OptionsFlow):
             Resultat de fin de flux.
         """
         return self.async_create_entry(title="", data=options)
+
+
+_WEEKDAY_LABELS = ("lun.", "mar.", "mer.", "jeu.", "ven.", "sam.", "dim.")
+
+_MANUAL_EVENT_SCHEMA = vol.Schema(
+    {
+        vol.Required("summary"): selector.TextSelector(),
+        vol.Required("start_date"): selector.DateSelector(),
+        vol.Optional("end_date"): selector.DateSelector(),
+        vol.Optional("weekdays", default=[]): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=[str(day) for day in range(7)],
+                multiple=True,
+                translation_key="weekdays",
+                mode=selector.SelectSelectorMode.LIST,
+            )
+        ),
+        vol.Optional("start_time"): selector.TimeSelector(),
+        vol.Optional("end_time"): selector.TimeSelector(),
+        vol.Optional("skip_closures", default=True): selector.BooleanSelector(),
+    }
+)
+
+
+def _parse_form_time(value: Any) -> time | None:
+    """Lit une heure du formulaire ("HH:MM" ou "HH:MM:SS"), vide si absente."""
+    if not value:
+        return None
+    return cv.time(value)
+
+
+def _build_manual_rule(
+    user_input: dict[str, Any],
+) -> tuple[ManualEvent | None, str | None]:
+    """Construit une regle d'evenement manuel a partir du formulaire.
+
+    Args:
+        user_input: Donnees du formulaire d'ajout.
+
+    Returns:
+        Couple (regle, None) si la saisie est valide, sinon (None, cle d'erreur).
+    """
+    summary = str(user_input.get("summary", "")).strip()
+    if not summary:
+        return None, "manual_event_summary_required"
+    try:
+        start_date = date.fromisoformat(user_input["start_date"])
+        end_date = (
+            date.fromisoformat(user_input["end_date"])
+            if user_input.get("end_date")
+            else start_date
+        )
+        start_time = _parse_form_time(user_input.get("start_time"))
+        end_time = _parse_form_time(user_input.get("end_time"))
+    except (ValueError, KeyError, vol.Invalid):
+        return None, "manual_event_invalid"
+    if end_date < start_date:
+        return None, "manual_event_range"
+    if (start_time is None) != (end_time is None):
+        return None, "manual_event_times_together"
+    if start_time and end_time and end_time <= start_time:
+        return None, "manual_event_times_order"
+    weekdays = tuple(sorted({int(day) for day in user_input.get("weekdays") or []}))
+    try:
+        rule = ManualEvent(
+            event_id=build_manual_event_id(summary, start_date, weekdays, start_time),
+            summary=summary,
+            start_date=start_date,
+            end_date=end_date,
+            weekdays=weekdays,
+            start_time=start_time,
+            end_time=end_time,
+            skip_closures=bool(user_input.get("skip_closures", True)),
+        )
+    except ValueError:
+        return None, "manual_event_invalid"
+    return rule, None
+
+
+def _form_values(item: dict[str, Any]) -> dict[str, Any]:
+    """Convertit une regle stockee en valeurs de formulaire.
+
+    Les jours de semaine redeviennent des chaines (le selecteur en attend) et
+    les champs absents sont omis plutot que mis a vide.
+    """
+    values: dict[str, Any] = {
+        "summary": item.get("summary", ""),
+        "start_date": item.get("start_date"),
+        "end_date": item.get("end_date"),
+        "weekdays": [str(day) for day in item.get("weekdays") or []],
+        "skip_closures": bool(item.get("skip_closures", True)),
+    }
+    if item.get("start_time") and item.get("end_time"):
+        values["start_time"] = item["start_time"]
+        values["end_time"] = item["end_time"]
+    return {key: value for key, value in values.items() if value is not None}
+
+
+def _describe_manual_event(item: dict[str, Any]) -> str:
+    """Decrit une regle stockee pour la liste de retrait."""
+    summary = item.get("summary") or item.get("id")
+    days = ", ".join(
+        _WEEKDAY_LABELS[day]
+        for day in item.get("weekdays") or []
+        if isinstance(day, int) and 0 <= day <= 6
+    )
+    start, end = item.get("start_date"), item.get("end_date")
+    period = start if not days or start == end else f"{start} > {end}"
+    hours = (
+        f" {item['start_time']}-{item['end_time']}"
+        if item.get("start_time") and item.get("end_time")
+        else ""
+    )
+    return f"{summary} ({days + ', ' if days else ''}{period}{hours})"
 
 
 def _is_http_url(value: str) -> bool:

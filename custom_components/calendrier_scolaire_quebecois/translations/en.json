@@ -37,6 +37,9 @@
           "settings": "Change settings",
           "add_source": "Add a source",
           "remove_source": "Remove sources",
+          "add_manual_event": "Add a manual event",
+          "edit_manual_event": "Edit a manual event",
+          "remove_manual_event": "Remove manual events",
           "feed": "Publish to an external calendar app"
         }
       },
@@ -71,6 +74,54 @@
         "data": {
           "sources": "Sources"
         }
+      },
+      "add_manual_event": {
+        "title": "Add a manual event",
+        "description": "With no weekday, the event covers the start date only. With weekdays, it repeats weekly until the end date. With no times, it lasts all day.",
+        "data": {
+          "summary": "Title",
+          "start_date": "Start date",
+          "end_date": "End date (inclusive)",
+          "weekdays": "Weekdays",
+          "start_time": "Start time",
+          "end_time": "End time",
+          "skip_closures": "Skip closure days"
+        },
+        "data_description": {
+          "end_date": "Optional for a one-off event.",
+          "skip_closures": "Drops occurrences that fall on a holiday, pedagogical day, public holiday or outside the school year."
+        }
+      },
+      "remove_manual_event": {
+        "title": "Remove manual events",
+        "description": "Select the events to remove.",
+        "data": {
+          "manual_events": "Events"
+        }
+      },
+      "edit_manual_event": {
+        "title": "Edit a manual event",
+        "description": "Select the event to edit.",
+        "data": {
+          "manual_event": "Event"
+        }
+      },
+      "update_manual_event": {
+        "title": "Edit the manual event",
+        "description": "The identifier is derived from the title, start date, weekdays and start time: changing any of them changes the event's identifier.",
+        "data": {
+          "summary": "Title",
+          "start_date": "Start date",
+          "end_date": "End date (inclusive)",
+          "weekdays": "Weekdays",
+          "start_time": "Start time",
+          "end_time": "End time",
+          "skip_closures": "Skip closure days"
+        },
+        "data_description": {
+          "end_date": "Optional for a one-off event.",
+          "skip_closures": "Drops occurrences that fall on a holiday, pedagogical day, public holiday or outside the school year."
+        }
       }
     },
     "error": {
@@ -78,10 +129,17 @@
       "invalid_url": "The address must be a valid HTTP or HTTPS URL.",
       "not_a_calendar": "This document does not look like a school calendar: no holiday, pedagogical day, spring break or term start was found. Check the address. If it is a scanned PDF, enable OCR.",
       "already_exists": "This source is already configured.",
-      "unknown": "An unexpected error occurred."
+      "unknown": "An unexpected error occurred.",
+      "manual_event_summary_required": "The title is required.",
+      "manual_event_invalid": "The dates or times entered are invalid.",
+      "manual_event_range": "The end date cannot be before the start date.",
+      "manual_event_times_together": "Provide both start and end times, or neither.",
+      "manual_event_times_order": "The end time must be after the start time.",
+      "manual_event_exists": "An identical event already exists."
     },
     "abort": {
-      "no_sources": "No source is configured for this calendar."
+      "no_sources": "No source is configured for this calendar.",
+      "no_manual_events": "No manual event is configured for this calendar."
     }
   },
   "entity": {
