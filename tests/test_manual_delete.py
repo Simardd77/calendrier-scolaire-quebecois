@@ -274,3 +274,40 @@ def test_une_occurrence_deja_retiree_n_existe_plus():
     options = delete_manual_occurrence(_options(_rule()), "serie1", "2026-11-23", None)
     with pytest.raises(ValueError, match="n'existe plus"):
         delete_manual_occurrence(options, "serie1", "2026-11-23", None)
+
+
+# --- Serie reduite a une occurrence -------------------------------------------
+
+
+def test_une_seule_occurrence_restante_se_presente_comme_ordinaire():
+    rule = _rule(excluded_dates=(LUNDI_16, LUNDI_23))  # il ne reste que le 30
+    (seule,) = expand_manual_event(rule, tz=TZ)
+    assert seule.extra["manual_event_id"] == "serie1"
+    assert seule.extra["manual_recurrence_id"] == ""
+    assert seule.extra["manual_rrule"] == ""
+
+
+def test_deux_occurrences_restent_une_serie():
+    rule = _rule(excluded_dates=(LUNDI_23,))
+    for occurrence in expand_manual_event(rule, tz=TZ):
+        assert occurrence.extra["manual_recurrence_id"] != ""
+        assert occurrence.extra["manual_rrule"] != ""
+
+
+def test_conversion_d_une_occurrence_unique_sans_repetition():
+    from custom_components.calendrier_scolaire_quebecois.calendar import (
+        _to_calendar_event,
+    )
+
+    rule = _rule(excluded_dates=(LUNDI_16, LUNDI_23))
+    evenement = _to_calendar_event(expand_manual_event(rule, tz=TZ)[0])
+    assert evenement.uid == "serie1"
+    assert evenement.recurrence_id is None
+    assert evenement.rrule is None
+
+
+def test_supprimer_l_occurrence_unique_sans_recurrence_id_retire_la_regle():
+    """La vue n'envoie pas de recurrence_id pour un evenement ordinaire."""
+    options = _options(_rule(excluded_dates=(LUNDI_16, LUNDI_23)))
+    resultat = delete_manual_occurrence(options, "serie1", None, None)
+    assert resultat[CONF_MANUAL_EVENTS] == []

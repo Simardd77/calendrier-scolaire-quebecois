@@ -645,7 +645,14 @@ def expand_manual_event(
             "Un fuseau horaire est requis pour generer les occurrences horodatees"
         )
 
-    occurrences = [_build_manual_occurrence(rule, day, tz) for day in rule_days(rule)]
+    days = rule_days(rule)
+    # Une serie reduite a une occurrence se presente comme un evenement ordinaire:
+    # la vue des calendriers n'a pas a proposer de supprimer « les suivants » quand
+    # il n'y en a plus. Supprimer cet evenement retire alors la regle entiere.
+    in_series = len(days) > 1
+    occurrences = [
+        _build_manual_occurrence(rule, day, tz, in_series=in_series) for day in days
+    ]
     occurrences.sort(key=lambda event: event.start)
     return occurrences
 
@@ -699,7 +706,7 @@ def manual_rrule(rule: ManualEvent) -> str | None:
 
 
 def _build_manual_occurrence(
-    rule: ManualEvent, day: date, tz: tzinfo | None
+    rule: ManualEvent, day: date, tz: tzinfo | None, *, in_series: bool
 ) -> SchoolEvent:
     """Construit l'occurrence d'une regle pour une journee donnee.
 
@@ -707,6 +714,9 @@ def _build_manual_occurrence(
         rule: Regle dont provient l'occurrence.
         day: Journee de l'occurrence.
         tz: Fuseau des occurrences horodatees.
+        in_series: Vrai si la regle compte encore plusieurs occurrences. Seules
+            celles-ci portent l'identifiant d'occurrence et la repetition que
+            lit la vue des calendriers.
 
     Returns:
         Occurrence sous forme de SchoolEvent.
@@ -726,8 +736,8 @@ def _build_manual_occurrence(
         source=MANUAL_EVENT_SOURCE,
         extra={
             "manual_event_id": rule.event_id,
-            "manual_recurrence_id": day.isoformat() if rule.is_recurring else "",
-            "manual_rrule": manual_rrule(rule) or "",
+            "manual_recurrence_id": day.isoformat() if in_series else "",
+            "manual_rrule": (manual_rrule(rule) or "") if in_series else "",
             # Chaque occurrence porte le drapeau, pour que le filtrage des jours
             # de fermeture soit autonome, sans relire la regle d'origine.
             "skip_closures": "1" if rule.skip_closures else "0",

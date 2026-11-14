@@ -186,3 +186,66 @@ async def test_une_occurrence_deja_retiree_est_refusee(
     assert reponse["success"] is False
     assert "n'existe plus" in reponse["error"]["message"]
     assert _regles(entry)[0]["excluded_dates"] == ["2026-11-23"]
+
+
+def _huit_lundis() -> ManualEvent:
+    """Les lundis du 16 novembre 2026 au 4 janvier 2027: 8 occurrences."""
+    return ManualEvent(
+        event_id="huit1",
+        summary="Chorale",
+        start_date=date(2026, 11, 16),
+        end_date=date(2027, 1, 4),
+        weekdays=(0,),
+        start_time=time(14, 0),
+        end_time=time(15, 0),
+    )
+
+
+async def _evenements_de_la_vue(hass):
+    entity = hass.data["calendar"].get_entity(ENTITY_ID)
+    debut = dt_util.as_local(datetime(2026, 11, 1))
+    return await entity.async_get_events(hass, debut, debut + timedelta(days=90))
+
+
+async def test_serie_de_huit_reduite_a_une_occurrence(
+    hass, hass_ws_client, enable_custom_integrations
+):
+    """Supprimer a partir de la 2e, puis il ne reste qu'un evenement ordinaire."""
+    entry = await _setup(hass, _huit_lundis())
+    assert len(await _evenements_de_la_vue(hass)) == 8
+
+    # A partir de la 2e occurrence (23 novembre), jusqu'a la fin.
+    reponse = await _delete(
+        hass, hass_ws_client, "huit1", "2026-11-23", "THISANDFUTURE"
+    )
+    assert reponse["success"], reponse
+
+    (reste,) = await _evenements_de_la_vue(hass)
+    assert reste.start.date().isoformat() == "2026-11-16"
+    # Plus de serie: la vue n'a rien a proposer au-dela d'un evenement ordinaire.
+    assert reste.recurrence_id is None
+    assert reste.rrule is None
+
+    # Comme l'interface pour un evenement ordinaire: uid seul, sans recurrence_id.
+    reponse = await _delete(hass, hass_ws_client, "huit1")
+    assert reponse["success"], reponse
+    assert not _regles(entry)
+    assert await _evenements_de_la_vue(hass) == []
+
+
+async def test_serie_reduite_a_une_occurrence_par_exclusions(
+    hass, hass_ws_client, enable_custom_integrations
+):
+    """Trois lundis, deux supprimes un a un: le dernier devient ordinaire."""
+    await _setup(hass, _serie())
+    await _delete(hass, hass_ws_client, "serie1", "2026-11-16")
+    avant = await _evenements_de_la_vue(hass)
+    assert len(avant) == 2
+    assert all(event.rrule for event in avant)  # deux restantes: encore une serie
+
+    await _delete(hass, hass_ws_client, "serie1", "2026-11-23")
+
+    (reste,) = await _evenements_de_la_vue(hass)
+    assert reste.start.date().isoformat() == "2026-11-30"
+    assert reste.recurrence_id is None
+    assert reste.rrule is None
