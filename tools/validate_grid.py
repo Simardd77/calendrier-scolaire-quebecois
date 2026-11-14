@@ -54,7 +54,9 @@ failures: list[str] = []
 
 def check(label: str, actual: object, expected: object) -> None:
     if actual != expected:
-        failures.append(f"{label}\n      attendu : {expected!r}\n      obtenu  : {actual!r}")
+        failures.append(
+            f"{label}\n      attendu : {expected!r}\n      obtenu  : {actual!r}"
+        )
 
 
 document = read_pdf(PDF.read_bytes())
@@ -74,8 +76,18 @@ for region in sorted(regions, key=lambda r: (r.year, r.month)):
     print(f"    {region.year}-{region.month:02d}  x={region.x_center:6.1f}")
 
 expected_months = [
-    (2026, 7), (2026, 8), (2026, 9), (2026, 10), (2026, 11), (2026, 12),
-    (2027, 1), (2027, 2), (2027, 3), (2027, 4), (2027, 5), (2027, 6),
+    (2026, 7),
+    (2026, 8),
+    (2026, 9),
+    (2026, 10),
+    (2026, 11),
+    (2026, 12),
+    (2027, 1),
+    (2027, 2),
+    (2027, 3),
+    (2027, 4),
+    (2027, 5),
+    (2027, 6),
 ]
 check(
     "mois et annees",
@@ -126,6 +138,8 @@ print()
 print("=" * 78)
 print("4. VERIFICATION DU NOMBRE DE JOURNEES PAR CATEGORIE")
 print("=" * 78)
+
+
 # La legende du document annonce 22 conges et 16 journees pedagogiques. Les
 # fins de semaine enjambees lors du regroupement ne doivent pas etre comptees.
 def marked_days(predicate) -> int:
@@ -242,7 +256,11 @@ print(f"  {'OK ' if fin else 'ECHEC'}  Fin des classes")
 for event in fin:
     print(f"        {event.first_day} : {event.summary}")
 
-check("rentree scolaire le 1er septembre", [e.first_day for e in rentree], [date(2026, 9, 1)])
+check(
+    "rentree scolaire le 1er septembre",
+    [e.first_day for e in rentree],
+    [date(2026, 9, 1)],
+)
 check("fin des classes le 23 juin", [e.first_day for e in fin], [date(2027, 6, 23)])
 
 print()
@@ -275,9 +293,7 @@ print("8. BORNES DE L'ANNEE SCOLAIRE DEDUITES DU DOCUMENT")
 print("=" * 78)
 from pkg.models import resolve_term_membership  # noqa: E402
 
-starts = sorted(
-    e.first_day for e in events if e.category is EventCategory.TERM_START
-)
+starts = sorted(e.first_day for e in events if e.category is EventCategory.TERM_START)
 ends = sorted(e.last_day for e in events if e.category is EventCategory.TERM_END)
 
 print(f"  rentree        : {starts}")

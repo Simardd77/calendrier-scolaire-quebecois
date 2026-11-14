@@ -175,9 +175,9 @@ def main() -> int:
         print("=" * 78)
         print("D. MARQUEURS NON RECONNUS COMME FONDS")
         print("=" * 78)
-        markers = [
-            ("rect", r) for r in page.rects if not is_background(r)
-        ] + [("curve", c) for c in page.curves if not is_background(c)]
+        markers = [("rect", r) for r in page.rects if not is_background(r)] + [
+            ("curve", c) for c in page.curves if not is_background(c)
+        ]
         print(f"  {len(markers)} marqueur(s) potentiel(s)")
 
         by_month: dict[str, list[str]] = {}

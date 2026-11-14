@@ -215,4 +215,14 @@ class StatusSensor(SchoolCalendarBaseEntity, SensorEntity):
                 }
                 for source in self.coordinator.sources
             ],
+            # Les evenements manuels sont listes avec leur identifiant pour la
+            # meme raison: le service remove_manual_event l'attend, et c'est ici
+            # qu'on le retrouve apres coup.
+            "manual_events": [
+                {
+                    "id": rule.event_id,
+                    "summary": rule.summary,
+                }
+                for rule in self.coordinator.manual_events
+            ],
         }

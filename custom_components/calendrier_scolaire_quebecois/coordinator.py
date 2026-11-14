@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, tzinfo
 from pathlib import Path
 
 from homeassistant.config_entries import ConfigEntry
@@ -17,6 +18,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_ENABLE_OCR,
+    CONF_MANUAL_EVENTS,
     CONF_REFRESH_INTERVAL,
     CONF_SOURCES,
     DEFAULT_ENABLE_OCR,
@@ -38,8 +40,11 @@ from .fetcher import (
 from .models import (
     CalendarSource,
     EventCategory,
+    ManualEvent,
     SchoolEvent,
     exclude_weekends,
+    expand_manual_event,
+    filter_manual_occurrences,
     singularize_one_day_summaries,
     is_calendar_like,
     merge_extraction_results,
@@ -195,6 +200,49 @@ class CalendarData:
 
         candidates.sort(key=lambda item: item[0])
         return candidates[0][1]
+
+
+def build_manual_events(
+    rules: list[ManualEvent],
+    source_events: list[SchoolEvent],
+    today: date,
+    tz: tzinfo,
+) -> list[SchoolEvent]:
+    """Genere et filtre les occurrences des regles manuelles.
+
+    Les jours de fermeture et les bornes de periode sont deduits des evenements
+    des sources: sans source exploitable, rien n'est connu comme ferme et les
+    occurrences passent toutes. Fonction pure, testable sans instance de
+    coordinateur.
+
+    Args:
+        rules: Regles manuelles configurees.
+        source_events: Evenements consolides des sources, deja traites.
+        today: Journee de reference pour choisir l'annee scolaire courante.
+        tz: Fuseau applique aux occurrences horodatees.
+
+    Returns:
+        Occurrences manuelles conservees apres filtrage, triees par debut.
+    """
+    if not rules:
+        return []
+
+    closed_days = frozenset(
+        event.first_day + timedelta(days=offset)
+        for event in source_events
+        if event.closes_school
+        for offset in range((event.last_day - event.first_day).days + 1)
+    )
+    term_start, term_end = CalendarData(events=source_events).current_term(today)
+
+    occurrences: list[SchoolEvent] = []
+    for rule in rules:
+        generated = expand_manual_event(rule, tz=tz)
+        occurrences.extend(
+            filter_manual_occurrences(generated, closed_days, term_start, term_end)
+        )
+
+    return occurrences
 
 
 # --- Fonctions synchrones destinees a un executor ----------------------------
@@ -447,6 +495,19 @@ async def async_probe_source(
     return []
 
 
+@dataclass(frozen=True, slots=True)
+class _SourceSnapshot:
+    """Resultat du dernier telechargement des sources.
+
+    Conserve pour recalculer le calendrier quand seuls les evenements manuels
+    changent, sans retelecharger les documents.
+    """
+
+    events: list[SchoolEvent]
+    errors: dict[str, str]
+    sources_total: int
+
+
 class SchoolCalendarCoordinator(DataUpdateCoordinator[CalendarData]):
     """Recupere et analyse les sources de calendrier scolaire."""
 
@@ -470,6 +531,8 @@ class SchoolCalendarCoordinator(DataUpdateCoordinator[CalendarData]):
                 )
             ),
         )
+        self._snapshot: _SourceSnapshot | None = None
+        self._settings = self._settings_of(entry)
 
     @staticmethod
     def _read_option(entry: ConfigEntry, key: str, default: object) -> object:
@@ -519,6 +582,80 @@ class SchoolCalendarCoordinator(DataUpdateCoordinator[CalendarData]):
         return sources
 
     @property
+    def manual_events(self) -> list[ManualEvent]:
+        """Regles d'evenements saisis a la main.
+
+        Returns:
+            Liste des regles valides. Une entree malformee est ignoree avec un
+            avertissement, comme pour les sources.
+        """
+        raw = self._read_option(self.config_entry, CONF_MANUAL_EVENTS, []) or []
+        rules: list[ManualEvent] = []
+
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            try:
+                rules.append(ManualEvent.from_dict(item))
+            except ValueError as err:
+                _LOGGER.warning("Evenement manuel ignore: %s", err)
+
+        return rules
+
+    @staticmethod
+    def _settings_of(entry: ConfigEntry) -> dict[str, object]:
+        """Photographie les reglages de l'entree, evenements manuels exclus.
+
+        Sert a reconnaitre une modification qui ne touche que les evenements
+        manuels: dans ce cas les sources n'ont pas a etre retelechargees.
+
+        Args:
+            entry: Entree de configuration.
+
+        Returns:
+            Copie profonde du titre, des donnees et des options, sans la liste des
+            evenements manuels.
+        """
+        options = {
+            key: value
+            for key, value in entry.options.items()
+            if key != CONF_MANUAL_EVENTS
+        }
+        return copy.deepcopy(
+            {"title": entry.title, "data": dict(entry.data), "options": options}
+        )
+
+    @property
+    def only_manual_events_changed(self) -> bool:
+        """Indique si seuls les evenements manuels ont change depuis le chargement.
+
+        Returns:
+            True si les sources et les reglages sont inchanges et qu'un
+            telechargement a deja eu lieu. Le calendrier peut alors etre
+            recalcule sans rien retelecharger.
+        """
+        return (
+            self._snapshot is not None
+            and self._settings_of(self.config_entry) == self._settings
+        )
+
+    def async_rebuild_from_snapshot(self) -> None:
+        """Recalcule le calendrier a partir des sources deja telechargees.
+
+        Evite de recharger l'integration, et donc de retelecharger les PDF, quand
+        on ajoute ou retire un evenement manuel. L'entite reste disponible, ce
+        qui evite a la vue des calendriers de recevoir une erreur pendant le
+        rechargement.
+
+        Raises:
+            UpdateFailed: Si le calendrier serait totalement vide parce que
+                toutes les sources ont echoue.
+        """
+        if self._snapshot is None:  # pragma: no cover - garde-fou
+            raise UpdateFailed("Aucun telechargement a partir duquel recalculer")
+        self.async_set_updated_data(self._build_data(self._snapshot))
+
+    @property
     def fallback_school_year(self) -> int:
         """Annee scolaire deduite de la date courante locale."""
         return school_year_start_for(dt_util.now().date())
@@ -534,46 +671,80 @@ class SchoolCalendarCoordinator(DataUpdateCoordinator[CalendarData]):
         """
         sources = self.sources
 
-        if not sources:
-            _LOGGER.debug("Aucune source configuree pour %s", self.config_entry.title)
-            return CalendarData()
-
-        results = await asyncio.gather(
-            *(self._async_load_source(source) for source in sources),
-            return_exceptions=True,
-        )
-
         events: list[SchoolEvent] = []
         errors: dict[str, str] = {}
 
-        for source, result in zip(sources, results, strict=True):
-            if isinstance(result, BaseException):
-                errors[source.name] = str(result)
-                _LOGGER.warning("Source '%s' en echec: %s", source.name, result)
-                continue
-            events.extend(result)
-
-        if len(errors) == len(sources):
-            raise UpdateFailed(
-                "Aucune source n'a pu etre traitee: "
-                + "; ".join(f"{name}: {msg}" for name, msg in errors.items())
+        if sources:
+            results = await asyncio.gather(
+                *(self._async_load_source(source) for source in sources),
+                return_exceptions=True,
             )
+            for source, result in zip(sources, results, strict=True):
+                if isinstance(result, BaseException):
+                    errors[source.name] = str(result)
+                    _LOGGER.warning("Source '%s' en echec: %s", source.name, result)
+                    continue
+                events.extend(result)
 
         # Les fins de semaine sont retirees des fermetures: un calendrier
         # annonce un conge par ses dates, sans distinguer les samedis et
         # dimanches qu'il traverse. L'accord du titre vient ensuite, le
         # decoupage etant ce qui produit les journees isolees.
+        source_events = singularize_one_day_summaries(exclude_weekends(events))
+        self._snapshot = _SourceSnapshot(
+            events=source_events, errors=errors, sources_total=len(sources)
+        )
+        return self._build_data(self._snapshot)
+
+    def _build_data(self, snapshot: _SourceSnapshot) -> CalendarData:
+        """Assemble le calendrier: evenements de sources et evenements manuels.
+
+        Args:
+            snapshot: Resultat du dernier telechargement des sources.
+
+        Returns:
+            Donnees consolidees du calendrier.
+
+        Raises:
+            UpdateFailed: Si le calendrier serait totalement vide parce que
+                toutes les sources ont echoue.
+        """
+        source_events = snapshot.events
+        errors = snapshot.errors
+        sources_total = snapshot.sources_total
+        manual_rules = self.manual_events
+
+        # Les occurrences manuelles sont calculees a partir des evenements des
+        # sources, car le filtrage des jours de fermeture a besoin des conges
+        # qu'elles annoncent. Sans source exploitable, aucun jour n'est connu
+        # comme ferme et les occurrences manuelles passent toutes.
+        manual_events = build_manual_events(
+            manual_rules,
+            source_events,
+            today=dt_util.now().date(),
+            tz=dt_util.DEFAULT_TIME_ZONE,
+        )
+
+        # Echec seulement si le calendrier serait totalement vide. Des sources
+        # en echec n'empechent pas d'afficher des evenements manuels; l'erreur
+        # reste visible via l'attribut source_errors du capteur d'etat.
+        if sources_total and len(errors) == sources_total and not manual_events:
+            raise UpdateFailed(
+                "Aucune source n'a pu etre traitee: "
+                + "; ".join(f"{name}: {msg}" for name, msg in errors.items())
+            )
+
         data = CalendarData(
-            events=singularize_one_day_summaries(exclude_weekends(events)),
+            events=source_events + manual_events,
             source_errors=errors,
-            sources_total=len(sources),
+            sources_total=sources_total,
         )
 
         _LOGGER.debug(
-            "%d evenement(s) depuis %d/%d source(s) pour %s",
+            "%d evenement(s) (%d source(s), %d manuel(s)) pour %s",
             len(data.events),
             data.sources_ok,
-            data.sources_total,
+            len(manual_events),
             self.config_entry.title,
         )
 

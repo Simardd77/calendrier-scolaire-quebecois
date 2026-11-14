@@ -121,13 +121,16 @@ L'intégration se configure entièrement par l'interface. La configuration par
 
 ### Gérer les sources après l'installation
 
-**Configurer** sur la carte de l'intégration ouvre un menu à quatre entrées :
+**Configurer** sur la carte de l'intégration ouvre un menu à sept entrées :
 
 | Entrée | Rôle |
 |---|---|
 | **Modifier les réglages** | Intervalle de rafraîchissement et OCR |
 | **Ajouter une source** | Même formulaire que l'installation, équivalent du service `add_source` |
 | **Retirer des sources** | Sélection dans la liste des sources configurées, sans avoir à connaître leur identifiant |
+| **Ajouter un événement manuel** | Titre, dates, jours de semaine et heures, équivalent du service `add_manual_event` |
+| **Modifier un événement manuel** | Choix dans la liste, puis formulaire prérempli. L'identifiant dérive du titre, de la date de début, des jours et de l'heure de début, et change donc si l'un d'eux est modifié |
+| **Retirer des événements manuels** | Sélection dans la liste des événements saisis, équivalent du service `remove_manual_event` |
 | **Publier vers un agenda externe** | Adresse du flux iCalendar et renouvellement du secret |
 
 Passer par **Retirer des sources** est la voie la plus simple pour en supprimer
@@ -305,6 +308,7 @@ développement → États**, en sélectionnant l'entité.
 | | `errors` | Message d'erreur par nom de source |
 | | `ocr_enabled` | Reflet du réglage OCR |
 | | `sources` | Liste de `id`, `name`, `url`, `type` — la clé `id` est le `source_id` attendu par `remove_source` |
+| | `manual_events` | Liste de `id`, `summary` des événements manuels — la clé `id` est l'`event_id` attendu par `remove_manual_event` |
 | `École ouverte` | `term_start`, `term_end` | Début et fin de l'année scolaire en cours, déduits du document, `null` s'il ne les annonce pas. Plusieurs années chargées ne donnent pas leur enveloppe |
 | | `reason` | `weekend`, `outside_term`, `holiday`, `pedagogical_day`, ou `null` si l'école est ouverte |
 | | `summary` | Titre du congé en cours, `null` sinon |
@@ -412,6 +416,12 @@ sont marqués `TRANSP:TRANSPARENT`, donc ils ne vous font pas apparaître comme
 occupé. Chaque événement porte sa catégorie dans `CATEGORIES`, ce qui permet un
 filtrage côté client.
 
+Les événements avec une heure, comme un événement manuel de 10 h à 11 h, sont
+publiés en **heure locale**, selon le fuseau horaire configuré dans Home
+Assistant, sans suffixe `Z` ni fuseau. Calendrier d'Apple les affiche tels quels,
+sans ligne « GMT ». Un abonné situé dans un autre fuseau voit donc la même heure
+sur sa montre, pas l'heure convertie.
+
 ### Qu'est-ce qui ferait changer l'adresse
 
 | Action | Effet |
@@ -476,6 +486,132 @@ homeassistant:
 Lorsque plusieurs calendriers sont configurés, ajoutez `config_entry_id` pour
 désigner celui visé. Les services `add_source`, `remove_source` et `parse_pdf`
 retournent sinon une erreur explicite.
+
+### Ajouter un événement depuis la vue des calendriers
+
+Le bouton d'ajout de la vue des calendriers de Home Assistant crée un événement
+manuel, comme le service `add_manual_event`. Il est enregistré dans les options
+de l'intégration, avec `skip_closures` actif : le formulaire natif n'offre pas ce
+choix. Pour un événement qui doit tomber un jour de fermeture, utilisez
+**Configurer** ou le service.
+
+Exemple : un événement de 14 h à 15 h, répété chaque semaine le lundi, avec une
+fin de répétition au 30 novembre.
+
+| Ce que le formulaire accepte | Traduction |
+|---|---|
+| Un événement ponctuel, journée entière ou avec heures | Un jour, sans jour de semaine |
+| Répétition **hebdomadaire**, avec ou sans choix de jours | Jours de semaine sur une plage de dates |
+| Répétition **quotidienne** | Les sept jours de la semaine |
+| Fin par **date** ou par **nombre de fois** | Date de fin de la plage |
+
+Sont refusés, avec un message dans l'interface :
+
+- une répétition **sans fin** : indiquez une date ou un nombre de fois ;
+- une répétition **mensuelle ou annuelle**, « une semaine sur deux » ou « le 3e
+  lundi du mois » ;
+- un événement de **plusieurs jours**, avec ou sans heures : utilisez une
+  répétition hebdomadaire sur la plage voulue ;
+- une **description** ou un **lieu**, que les événements manuels ne conservent
+  pas.
+
+Les heures sont lues dans le fuseau horaire configuré dans Home Assistant. Une
+fin de répétition par date est inclusive.
+
+### Supprimer un événement depuis la vue des calendriers
+
+Ouvrez un événement manuel dans la vue des calendriers et supprimez-le. Pour un
+événement répété, Home Assistant propose deux choix :
+
+| Choix | Effet |
+|---|---|
+| **Cet événement seulement** | Cette journée est retirée de la série, les autres restent |
+| **Cet événement et les suivants** | La série s'arrête la veille de cette journée |
+
+Pour supprimer toute la série, choisissez « cet événement et les suivants » sur
+**la première occurrence**. Un événement ponctuel se supprime directement. Une
+série dont il ne reste aucune occurrence disparaît d'elle-même.
+
+- **Seuls les événements manuels se suppriment ici.** Un congé ou une journée
+  pédagogique vient d'une source, relue à chaque rafraîchissement : retirez la
+  source dans **Configurer**.
+- Une journée retirée d'une série **reste retirée** quand on modifie
+  l'événement dans **Configurer**, tant qu'elle tombe dans la nouvelle plage de
+  dates.
+- L'identifiant de la série (`event_id`) ne change pas quand on retire une
+  journée ou la fin d'une série.
+
+### `add_manual_event`
+
+Ajoute au calendrier un événement saisi à la main, en plus des sources
+téléchargées. Utile pour ce qu'un calendrier officiel ne contient pas : un cours
+récurrent, une activité, un rendez-vous.
+
+Événement ponctuel, sur une seule journée :
+
+```yaml
+action: calendrier_scolaire_quebecois.add_manual_event
+data:
+  summary: Sortie au musée
+  start_date: "2026-10-15"
+  end_date: "2026-10-15"
+```
+
+Événement récurrent horodaté, les mardis et jeudis jusqu'à la fin de l'année :
+
+```yaml
+action: calendrier_scolaire_quebecois.add_manual_event
+data:
+  summary: Éducation physique
+  start_date: "2026-09-01"
+  end_date: "2027-06-23"
+  weekdays: [mardi, jeudi]
+  start_time: "10:00:00"
+  end_time: "11:00:00"
+response_variable: resultat
+```
+
+Les champs :
+
+| Champ | Rôle |
+|---|---|
+| `summary` | Titre affiché dans le calendrier |
+| `start_date` | Première journée. Pour un événement ponctuel, mettre la même valeur que `end_date` et laisser `weekdays` vide |
+| `end_date` | Dernière journée, **incluse** |
+| `weekdays` | Jours de répétition, par nom (`mardi`) ou indice (lundi = `0`). Vide pour un événement ponctuel |
+| `start_time`, `end_time` | Heures, les deux ensemble ou aucune. Sans elles, l'événement couvre la journée entière |
+| `skip_closures` | `true` par défaut. Masque les occurrences tombant un congé, une journée pédagogique, un jour férié ou hors de l'année scolaire |
+
+Le service **retourne l'`event_id`** de l'événement créé, à conserver pour le
+retirer. Avec `response_variable`, il est accessible dans `resultat.event_id`.
+
+#### `skip_closures` et le calendrier officiel
+
+`skip_closures` s'appuie sur les fermetures **connues du calendrier**,
+c'est-à-dire celles qu'une source a fournies. Un cours du mardi ne s'affiche
+donc pas un mardi de relâche ou de journée pédagogique annoncé par le PDF.
+Mettez-le à `false` pour un événement qui doit paraître même ces jours-là, par
+exemple une activité privée pendant la relâche.
+
+Conséquence à connaître : **sans aucune source de calendrier, aucune fermeture
+n'est connue**, donc rien n'est masqué, même avec `skip_closures` à `true`.
+L'intégration ne possède pas de liste des jours fériés québécois ; elle déduit
+les fermetures du document. Un calendrier composé uniquement d'événements
+manuels affiche donc toutes leurs occurrences.
+
+### `remove_manual_event`
+
+Retire un événement manuel par son identifiant.
+
+```yaml
+action: calendrier_scolaire_quebecois.remove_manual_event
+data:
+  event_id: a1b2c3d4e5f6
+```
+
+L'`event_id` est celui retourné par `add_manual_event`. On le retrouve aussi à
+tout moment dans l'attribut `manual_events` du capteur **État**, qui liste
+chaque règle avec son `id` et son `summary`.
 
 ## Exemples d'automatisation
 
@@ -714,9 +850,11 @@ Ouvrez l'adresse du flux dans un navigateur : le code renvoyé indique la cause.
 - Un calendrier en grille dont les formes ne sont pas des objets vectoriels,
   parce qu'il s'agit d'une image, nécessiterait de la reconnaissance de formes
   que l'OCR ne fournit pas.
-- Le calendrier est en lecture seule : la création d'événements depuis Home
-  Assistant n'est pas prise en charge, puisque chaque rafraîchissement
-  reconstruit les événements à partir des sources.
+- Depuis la vue des calendriers de Home Assistant, on peut **ajouter** et
+  **supprimer** un événement manuel, mais pas le modifier : la modification
+  passe par **Configurer** (voir *Gérer les sources après l'installation*).
+  Les répétitions autres que des jours de semaine sur une plage de dates sont
+  refusées (voir *Ajouter un événement depuis la vue des calendriers*).
 - Le flux iCalendar publié n'est pas authentifié par un jeton, l'autorisation
   reposant sur un secret contenu dans l'adresse. C'est une contrainte des
   applications d'agenda, qui ne savent pas s'authentifier auprès de Home
@@ -752,6 +890,7 @@ coordinator.py      cycle de rafraîchissement, CalendarData
 | `models.py` | Modèle d'événement et règles métier | non |
 | `parsers/` | Extraction depuis PDF, iCalendar, HTML | non |
 | `ics.py` | Sérialisation RFC 5545 du flux publié | non |
+| `manual_rule.py` | Création et suppression d'événements manuels depuis la vue des calendriers (traduction de la `RRULE`, retrait d'une occurrence ou de la fin d'une série) | non |
 | `fetcher.py` | Téléchargement et découverte de documents | non |
 | `coordinator.py` | Orchestration des cycles de mise à jour | oui |
 | `config_flow.py` | Configuration et options | oui |
@@ -802,6 +941,35 @@ Deux calendriers 2026-2027 sont fournis dans ce dossier, ceux du CSS des
 Patriotes et du CSS de Montréal, pour faire tourner les outils sans rien
 télécharger. Ils appartiennent à leur centre de services scolaire respectif.
 N'importe quel autre calendrier PDF fonctionne : passez son chemin en argument.
+
+### Conventions de commit
+
+Le changelog publié à chaque release est généré à partir des messages de commit.
+Deux règles en découlent.
+
+**Le préfixe reste en anglais**, selon la convention Conventional Commits. C'est
+lui qui classe le commit dans le changelog :
+
+| Préfixe | Section du changelog |
+|---|---|
+| `feat:` | 🚀 Nouveautés |
+| `fix:` | 🐛 Corrections |
+| `docs:` | 📝 Documentation |
+| `ci:` | 📦 Intégration continue |
+| `chore:`, `refactor:`, `style:`, `perf:`, `test:` | 🧹 Maintenance |
+
+**La description, après le `:`, s'écrit en français.** Elle apparaît telle
+quelle dans le changelog, que lisent les utilisateurs francophones de
+l'intégration. La CI ne peut pas la traduire : c'est au moment du commit que la
+langue se joue.
+
+```
+feat: ajout du support du calendrier de l'Altitude      ← oui
+feat: support Altitude calendar symbols                 ← non, anglais
+```
+
+Deux types de commits sont exclus du changelog, donc leur langue importe peu :
+les fusions `Merge pull request #N` et le `chore: bump version to X`.
 
 ## Support
 

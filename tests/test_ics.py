@@ -194,6 +194,77 @@ def test_evenement_horodate_converti_en_utc():
     assert "TRANSP:TRANSPARENT" not in lignes
 
 
+def test_evenement_horodate_en_heure_locale_flottante():
+    """Avec un fuseau, l'heure est publiee sans Z, donc sans « GMT » chez iCloud."""
+    from zoneinfo import ZoneInfo
+
+    montreal = ZoneInfo("America/Toronto")
+    debut = datetime(2026, 11, 16, 14, 0, tzinfo=montreal)
+    evenement = SchoolEvent(
+        summary="Education physique",
+        start=debut,
+        end=debut + timedelta(hours=1),
+        category=EventCategory.EVENT,
+    )
+    lignes = _lignes(build_ics("Test", [evenement], now=NOW, tz=montreal))
+    assert "DTSTART:20261116T140000" in lignes
+    assert "DTEND:20261116T150000" in lignes
+    assert not any(
+        ligne.startswith(("DTSTART:", "DTEND:")) and ligne.endswith("Z")
+        for ligne in lignes
+    )
+
+
+def test_heure_locale_convertie_depuis_un_autre_fuseau():
+    """Un evenement fourni en UTC est ramene a l'heure locale, pas copie tel quel."""
+    from zoneinfo import ZoneInfo
+
+    montreal = ZoneInfo("America/Toronto")
+    debut = datetime(2026, 11, 16, 19, 0, tzinfo=timezone.utc)  # 14 h a Montreal
+    evenement = SchoolEvent(
+        summary="Rencontre",
+        start=debut,
+        end=debut + timedelta(hours=1),
+        category=EventCategory.MEETING,
+    )
+    lignes = _lignes(build_ics("Test", [evenement], now=NOW, tz=montreal))
+    assert "DTSTART:20261116T140000" in lignes
+    assert "DTEND:20261116T150000" in lignes
+
+
+def test_heure_locale_suit_le_changement_d_heure():
+    """L'ete (UTC-4) et l'hiver (UTC-5) donnent la meme heure locale."""
+    from zoneinfo import ZoneInfo
+
+    montreal = ZoneInfo("America/Toronto")
+    for jour in (datetime(2026, 7, 6, 14, 0), datetime(2026, 11, 16, 14, 0)):
+        debut = jour.replace(tzinfo=montreal)
+        evenement = SchoolEvent(
+            summary="Cours",
+            start=debut,
+            end=debut + timedelta(hours=1),
+            category=EventCategory.EVENT,
+        )
+        lignes = _lignes(build_ics("Test", [evenement], now=NOW, tz=montreal))
+        assert f"DTSTART:{jour.strftime('%Y%m%d')}T140000" in lignes
+
+
+def test_journee_entiere_inchangee_avec_fuseau():
+    from zoneinfo import ZoneInfo
+
+    evenement = SchoolEvent(
+        summary="Conge",
+        start=date(2026, 11, 16),
+        end=date(2026, 11, 17),
+        category=EventCategory.HOLIDAY,
+    )
+    lignes = _lignes(
+        build_ics("Test", [evenement], now=NOW, tz=ZoneInfo("America/Toronto"))
+    )
+    assert "DTSTART;VALUE=DATE:20261116" in lignes
+    assert "DTEND;VALUE=DATE:20261117" in lignes
+
+
 # --- build_ics: contenu des evenements --------------------------------------
 
 
