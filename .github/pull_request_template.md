@@ -3,8 +3,7 @@ Les commentaires de ce gabarit n'apparaissent pas dans la PR publiée. Supprimez
 les sections qui ne s'appliquent pas, mais gardez l'ordre des autres.
 
 BRANCHE CIBLE
-  Visez `develop`. Une PR vers `main` ne peut venir que de `develop` : la CI la
-  refuse autrement.
+  Visez `main`, la seule branche longue. Chaque fusion y publie une beta.
 
 TITRE DE LA PR
   Même forme que les commits : préfixe anglais, description en français.
@@ -37,7 +36,7 @@ MESSAGES DE COMMIT
 
 VERSION
   Ne modifiez pas `version` dans `manifest.json` : elle est incrémentée sur
-  `develop` juste après la sortie d'une version stable, pas dans une PR de
+  `main` juste après la sortie d'une version stable, pas dans une PR de
   fonctionnalité.
 -->
 
