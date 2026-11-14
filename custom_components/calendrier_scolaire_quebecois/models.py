@@ -297,6 +297,7 @@ MANUAL_KEY_WEEKDAYS = "weekdays"
 MANUAL_KEY_START_TIME = "start_time"
 MANUAL_KEY_END_TIME = "end_time"
 MANUAL_KEY_SKIP_CLOSURES = "skip_closures"
+MANUAL_KEY_EXCLUDED = "excluded_dates"
 
 
 @dataclass(frozen=True, slots=True)
@@ -318,6 +319,10 @@ class ManualEvent:
 
     Les heures sont optionnelles mais solidaires: soit les deux sont presentes
     et l'evenement est horodate, soit aucune et il couvre la journee entiere.
+
+    ``excluded_dates`` liste les journees retirees une a une d'une regle
+    recurrente, depuis la vue des calendriers. Elles n'entrent pas dans
+    l'identifiant, qui reste celui de la regle.
     """
 
     event_id: str
@@ -328,6 +333,7 @@ class ManualEvent:
     start_time: time | None = None
     end_time: time | None = None
     skip_closures: bool = True
+    excluded_dates: tuple[date, ...] = ()
 
     def __post_init__(self) -> None:
         """Valide la coherence de la regle.
@@ -382,6 +388,10 @@ class ManualEvent:
         if self.start_time is not None:
             data[MANUAL_KEY_START_TIME] = self.start_time.strftime("%H:%M")
             data[MANUAL_KEY_END_TIME] = self.end_time.strftime("%H:%M")
+        if self.excluded_dates:
+            data[MANUAL_KEY_EXCLUDED] = [
+                day.isoformat() for day in sorted(set(self.excluded_dates))
+            ]
         return data
 
     @classmethod
@@ -413,6 +423,12 @@ class ManualEvent:
         event_id = data.get(MANUAL_KEY_ID) or build_manual_event_id(
             summary, start, weekdays, start_time
         )
+        raw_excluded = data.get(MANUAL_KEY_EXCLUDED) or []
+        if not isinstance(raw_excluded, (list, tuple)):
+            raise ValueError("excluded_dates doit etre une liste de dates")
+        excluded = tuple(
+            sorted({_parse_iso_date(day, MANUAL_KEY_EXCLUDED) for day in raw_excluded})
+        )
 
         return cls(
             event_id=event_id,
@@ -423,6 +439,7 @@ class ManualEvent:
             start_time=start_time,
             end_time=end_time,
             skip_closures=bool(data.get(MANUAL_KEY_SKIP_CLOSURES, True)),
+            excluded_dates=excluded,
         )
 
 
@@ -628,12 +645,12 @@ def expand_manual_event(
             "Un fuseau horaire est requis pour generer les occurrences horodatees"
         )
 
-    occurrences = [_build_manual_occurrence(rule, day, tz) for day in _rule_days(rule)]
+    occurrences = [_build_manual_occurrence(rule, day, tz) for day in rule_days(rule)]
     occurrences.sort(key=lambda event: event.start)
     return occurrences
 
 
-def _rule_days(rule: ManualEvent) -> list[date]:
+def rule_days(rule: ManualEvent) -> list[date]:
     """Enumere les journees couvertes par une regle.
 
     Args:
@@ -642,18 +659,43 @@ def _rule_days(rule: ManualEvent) -> list[date]:
     Returns:
         Pour une regle ponctuelle, la seule ``start_date``. Pour une regle
         recurrente, chaque jour de la plage inclusive dont le jour de semaine
-        figure dans ``weekdays``.
+        figure dans ``weekdays``. Les journees de ``excluded_dates`` sont
+        omises dans les deux cas.
     """
     if not rule.is_recurring:
-        return [rule.start_date]
+        days = [rule.start_date]
+    else:
+        days = []
+        jour = rule.start_date
+        while jour <= rule.end_date:
+            if jour.weekday() in rule.weekdays:
+                days.append(jour)
+            jour += timedelta(days=1)
+    excluded = set(rule.excluded_dates)
+    return [day for day in days if day not in excluded]
 
-    jours: list[date] = []
-    jour = rule.start_date
-    while jour <= rule.end_date:
-        if jour.weekday() in rule.weekdays:
-            jours.append(jour)
-        jour += timedelta(days=1)
-    return jours
+
+_RRULE_DAY_CODES = ("MO", "TU", "WE", "TH", "FR", "SA", "SU")
+
+
+def manual_rrule(rule: ManualEvent) -> str | None:
+    """Decrit la repetition d'une regle sous forme de RRULE (RFC 5545).
+
+    Cette chaine ne sert pas a developper les occurrences, deja concretes: elle
+    indique a la vue des calendriers que l'evenement fait partie d'une serie,
+    ce qui lui fait proposer « cet evenement » ou « celui-ci et les suivants »
+    a la suppression.
+
+    Args:
+        rule: Regle a decrire.
+
+    Returns:
+        La RRULE, ou None pour une regle ponctuelle.
+    """
+    if not rule.is_recurring:
+        return None
+    byday = ",".join(_RRULE_DAY_CODES[day] for day in rule.weekdays)
+    return f"FREQ=WEEKLY;BYDAY={byday};UNTIL={rule.end_date.strftime('%Y%m%d')}"
 
 
 def _build_manual_occurrence(
@@ -684,6 +726,8 @@ def _build_manual_occurrence(
         source=MANUAL_EVENT_SOURCE,
         extra={
             "manual_event_id": rule.event_id,
+            "manual_recurrence_id": day.isoformat() if rule.is_recurring else "",
+            "manual_rrule": manual_rrule(rule) or "",
             # Chaque occurrence porte le drapeau, pour que le filtrage des jours
             # de fermeture soit autonome, sans relire la regle d'origine.
             "skip_closures": "1" if rule.skip_closures else "0",

@@ -518,6 +518,29 @@ Sont refusés, avec un message dans l'interface :
 Les heures sont lues dans le fuseau horaire configuré dans Home Assistant. Une
 fin de répétition par date est inclusive.
 
+### Supprimer un événement depuis la vue des calendriers
+
+Ouvrez un événement manuel dans la vue des calendriers et supprimez-le. Pour un
+événement répété, Home Assistant propose deux choix :
+
+| Choix | Effet |
+|---|---|
+| **Cet événement seulement** | Cette journée est retirée de la série, les autres restent |
+| **Cet événement et les suivants** | La série s'arrête la veille de cette journée |
+
+Pour supprimer toute la série, choisissez « cet événement et les suivants » sur
+**la première occurrence**. Un événement ponctuel se supprime directement. Une
+série dont il ne reste aucune occurrence disparaît d'elle-même.
+
+- **Seuls les événements manuels se suppriment ici.** Un congé ou une journée
+  pédagogique vient d'une source, relue à chaque rafraîchissement : retirez la
+  source dans **Configurer**.
+- Une journée retirée d'une série **reste retirée** quand on modifie
+  l'événement dans **Configurer**, tant qu'elle tombe dans la nouvelle plage de
+  dates.
+- L'identifiant de la série (`event_id`) ne change pas quand on retire une
+  journée ou la fin d'une série.
+
 ### `add_manual_event`
 
 Ajoute au calendrier un événement saisi à la main, en plus des sources
@@ -827,12 +850,11 @@ Ouvrez l'adresse du flux dans un navigateur : le code renvoyé indique la cause.
 - Un calendrier en grille dont les formes ne sont pas des objets vectoriels,
   parce qu'il s'agit d'une image, nécessiterait de la reconnaissance de formes
   que l'OCR ne fournit pas.
-- Depuis la vue des calendriers de Home Assistant, on peut **ajouter** un
-  événement, mais pas le modifier ni le supprimer : ces deux actions passent par
-  **Configurer** (voir *Gérer les sources après l'installation*) ou par le
-  service `remove_manual_event`. Les répétitions autres que des jours de
-  semaine sur une plage de dates sont refusées (voir *Ajouter un événement
-  depuis la vue des calendriers*).
+- Depuis la vue des calendriers de Home Assistant, on peut **ajouter** et
+  **supprimer** un événement manuel, mais pas le modifier : la modification
+  passe par **Configurer** (voir *Gérer les sources après l'installation*).
+  Les répétitions autres que des jours de semaine sur une plage de dates sont
+  refusées (voir *Ajouter un événement depuis la vue des calendriers*).
 - Le flux iCalendar publié n'est pas authentifié par un jeton, l'autorisation
   reposant sur un secret contenu dans l'adresse. C'est une contrainte des
   applications d'agenda, qui ne savent pas s'authentifier auprès de Home
@@ -868,7 +890,7 @@ coordinator.py      cycle de rafraîchissement, CalendarData
 | `models.py` | Modèle d'événement et règles métier | non |
 | `parsers/` | Extraction depuis PDF, iCalendar, HTML | non |
 | `ics.py` | Sérialisation RFC 5545 du flux publié | non |
-| `manual_rule.py` | Traduction d'un événement de la vue des calendriers (dont sa `RRULE`) en événement manuel | non |
+| `manual_rule.py` | Création et suppression d'événements manuels depuis la vue des calendriers (traduction de la `RRULE`, retrait d'une occurrence ou de la fin d'une série) | non |
 | `fetcher.py` | Téléchargement et découverte de documents | non |
 | `coordinator.py` | Orchestration des cycles de mise à jour | oui |
 | `config_flow.py` | Configuration et options | oui |

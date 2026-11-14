@@ -321,3 +321,45 @@ async def test_modification_sans_evenement_abandonne(hass, enable_custom_integra
     )
     assert result["type"] == "abort"
     assert result["reason"] == "no_manual_events"
+
+
+async def test_modification_conserve_les_occurrences_retirees(
+    hass, enable_custom_integrations
+):
+    """Modifier un evenement ne fait pas reapparaitre ses occurrences supprimees."""
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    from custom_components.calendrier_scolaire_quebecois.const import (
+        CONF_MANUAL_EVENTS,
+        DOMAIN,
+    )
+    from custom_components.calendrier_scolaire_quebecois.models import ManualEvent
+
+    base, _ = _build_manual_rule(_form(weekdays=["0"]))
+    avec_exclusions = ManualEvent.from_dict(
+        {**base.as_dict(), "excluded_dates": ["2026-11-23", "2027-05-03"]}
+    )
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={"name": "T"},
+        options={CONF_MANUAL_EVENTS: [avec_exclusions.as_dict()]},
+    )
+    entry.add_to_hass(hass)
+
+    flow = hass.config_entries.options
+    result = await flow.async_init(entry.entry_id)
+    result = await flow.async_configure(
+        result["flow_id"], {"next_step_id": "edit_manual_event"}
+    )
+    result = await flow.async_configure(
+        result["flow_id"], {"manual_event": avec_exclusions.event_id}
+    )
+    # La plage se raccourcit: le 2027-05-03 sort de la plage, le 2026-11-23 reste.
+    result = await flow.async_configure(
+        result["flow_id"],
+        _form(weekdays=["0"], summary="EPS", end_date="2026-12-31"),
+    )
+    assert result["type"] == "create_entry"
+    stored = entry.options[CONF_MANUAL_EVENTS][0]
+    assert stored["summary"] == "EPS"
+    assert stored["excluded_dates"] == ["2026-11-23"]

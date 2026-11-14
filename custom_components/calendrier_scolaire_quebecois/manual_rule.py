@@ -13,17 +13,21 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone, tzinfo
 from typing import Any
 
 from .const import CONF_MANUAL_EVENTS
-from .models import ManualEvent, build_manual_event_id
+from .models import ManualEvent, build_manual_event_id, rule_days
 
 #: Codes RFC 5545 des jours, dans l'ordre de ``date.weekday()`` (lundi = 0).
 _DAY_CODES = ("MO", "TU", "WE", "TH", "FR", "SA", "SU")
 
 #: Parametres de RRULE que la traduction sait honorer.
 _SUPPORTED_PARTS = {"FREQ", "INTERVAL", "BYDAY", "UNTIL", "COUNT", "WKST"}
+
+#: Valeur iCalendar de ``recurrence_range`` pour « cet evenement et les suivants ».
+RANGE_THIS_AND_FUTURE = "THISANDFUTURE"
 
 #: Plafond de ``COUNT``: borne la boucle de calcul de la date de fin.
 _MAX_COUNT = 1000
@@ -231,4 +235,90 @@ def add_manual_rule(
     if any(item.get("id") == rule.event_id for item in stored):
         raise ValueError(f"Un evenement manuel identique existe deja dans '{title}'.")
     stored.append(rule.as_dict())
+    return {**options, CONF_MANUAL_EVENTS: stored}
+
+
+def delete_manual_occurrence(
+    options: Mapping[str, Any],
+    event_id: str,
+    recurrence_id: str | None,
+    recurrence_range: str | None,
+) -> dict[str, Any]:
+    """Retire un evenement manuel, une occurrence ou la fin d'une serie.
+
+    Reproduit les trois choix de la vue des calendriers:
+
+    - evenement ponctuel, ou sans ``recurrence_id``: la regle disparait;
+    - ``recurrence_id`` sans plage: seule cette journee est exclue de la serie;
+    - ``recurrence_range`` = ``THISANDFUTURE``: la serie s'arrete la veille de
+      cette journee. Choisie sur la premiere occurrence, elle retire tout.
+
+    Une regle qui n'a plus aucune occurrence est retiree des options.
+
+    Args:
+        options: Options courantes de l'entree.
+        event_id: Identifiant de la regle, qui sert d'``uid`` a ses occurrences.
+        recurrence_id: Journee de l'occurrence visee, au format ``AAAA-MM-JJ``.
+        recurrence_range: ``THISANDFUTURE``, ou None pour l'occurrence seule.
+
+    Returns:
+        Nouvelles options completes, a enregistrer.
+
+    Raises:
+        ValueError: Si l'evenement n'est pas un evenement manuel, si
+            l'occurrence n'existe pas ou si la plage n'est pas prise en charge.
+            Le message est destine a l'utilisateur.
+    """
+    stored = [
+        dict(item)
+        for item in options.get(CONF_MANUAL_EVENTS) or []
+        if isinstance(item, dict)
+    ]
+    index = next(
+        (i for i, item in enumerate(stored) if item.get("id") == event_id), None
+    )
+    if index is None:
+        raise ValueError(
+            "Seuls les evenements manuels se suppriment ici. Un evenement du "
+            "calendrier officiel vient d'une source: retirez la source dans "
+            "Configurer."
+        )
+    rule = ManualEvent.from_dict(stored[index])
+
+    if recurrence_range not in (None, "", RANGE_THIS_AND_FUTURE):
+        raise ValueError(
+            f"Plage de suppression non prise en charge: {recurrence_range}"
+        )
+
+    updated: ManualEvent | None
+    if not rule.is_recurring or not recurrence_id:
+        updated = None
+    else:
+        try:
+            day = date.fromisoformat(recurrence_id)
+        except ValueError as err:
+            raise ValueError(f"Occurrence invalide: {recurrence_id!r}") from err
+        if day not in rule_days(rule):
+            raise ValueError("Cette occurrence n'existe plus.")
+        if recurrence_range == RANGE_THIS_AND_FUTURE:
+            new_end = day - timedelta(days=1)
+            if new_end < rule.start_date:
+                updated = None
+            else:
+                updated = replace(
+                    rule,
+                    end_date=new_end,
+                    excluded_dates=tuple(
+                        d for d in rule.excluded_dates if d <= new_end
+                    ),
+                )
+        else:
+            updated = replace(rule, excluded_dates=(*rule.excluded_dates, day))
+        if updated is not None and not rule_days(updated):
+            updated = None
+
+    if updated is None:
+        del stored[index]
+    else:
+        stored[index] = updated.as_dict()
     return {**options, CONF_MANUAL_EVENTS: stored}
