@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, tzinfo
@@ -494,6 +495,19 @@ async def async_probe_source(
     return []
 
 
+@dataclass(frozen=True, slots=True)
+class _SourceSnapshot:
+    """Resultat du dernier telechargement des sources.
+
+    Conserve pour recalculer le calendrier quand seuls les evenements manuels
+    changent, sans retelecharger les documents.
+    """
+
+    events: list[SchoolEvent]
+    errors: dict[str, str]
+    sources_total: int
+
+
 class SchoolCalendarCoordinator(DataUpdateCoordinator[CalendarData]):
     """Recupere et analyse les sources de calendrier scolaire."""
 
@@ -517,6 +531,8 @@ class SchoolCalendarCoordinator(DataUpdateCoordinator[CalendarData]):
                 )
             ),
         )
+        self._snapshot: _SourceSnapshot | None = None
+        self._settings = self._settings_of(entry)
 
     @staticmethod
     def _read_option(entry: ConfigEntry, key: str, default: object) -> object:
@@ -586,6 +602,59 @@ class SchoolCalendarCoordinator(DataUpdateCoordinator[CalendarData]):
 
         return rules
 
+    @staticmethod
+    def _settings_of(entry: ConfigEntry) -> dict[str, object]:
+        """Photographie les reglages de l'entree, evenements manuels exclus.
+
+        Sert a reconnaitre une modification qui ne touche que les evenements
+        manuels: dans ce cas les sources n'ont pas a etre retelechargees.
+
+        Args:
+            entry: Entree de configuration.
+
+        Returns:
+            Copie profonde du titre, des donnees et des options, sans la liste des
+            evenements manuels.
+        """
+        options = {
+            key: value
+            for key, value in entry.options.items()
+            if key != CONF_MANUAL_EVENTS
+        }
+        return copy.deepcopy(
+            {"title": entry.title, "data": dict(entry.data), "options": options}
+        )
+
+    @property
+    def only_manual_events_changed(self) -> bool:
+        """Indique si seuls les evenements manuels ont change depuis le chargement.
+
+        Returns:
+            True si les sources et les reglages sont inchanges et qu'un
+            telechargement a deja eu lieu. Le calendrier peut alors etre
+            recalcule sans rien retelecharger.
+        """
+        return (
+            self._snapshot is not None
+            and self._settings_of(self.config_entry) == self._settings
+        )
+
+    def async_rebuild_from_snapshot(self) -> None:
+        """Recalcule le calendrier a partir des sources deja telechargees.
+
+        Evite de recharger l'integration, et donc de retelecharger les PDF, quand
+        on ajoute ou retire un evenement manuel. L'entite reste disponible, ce
+        qui evite a la vue des calendriers de recevoir une erreur pendant le
+        rechargement.
+
+        Raises:
+            UpdateFailed: Si le calendrier serait totalement vide parce que
+                toutes les sources ont echoue.
+        """
+        if self._snapshot is None:  # pragma: no cover - garde-fou
+            raise UpdateFailed("Aucun telechargement a partir duquel recalculer")
+        self.async_set_updated_data(self._build_data(self._snapshot))
+
     @property
     def fallback_school_year(self) -> int:
         """Annee scolaire deduite de la date courante locale."""
@@ -601,7 +670,6 @@ class SchoolCalendarCoordinator(DataUpdateCoordinator[CalendarData]):
             UpdateFailed: Si toutes les sources configurees ont echoue.
         """
         sources = self.sources
-        manual_rules = self.manual_events
 
         events: list[SchoolEvent] = []
         errors: dict[str, str] = {}
@@ -623,6 +691,28 @@ class SchoolCalendarCoordinator(DataUpdateCoordinator[CalendarData]):
         # dimanches qu'il traverse. L'accord du titre vient ensuite, le
         # decoupage etant ce qui produit les journees isolees.
         source_events = singularize_one_day_summaries(exclude_weekends(events))
+        self._snapshot = _SourceSnapshot(
+            events=source_events, errors=errors, sources_total=len(sources)
+        )
+        return self._build_data(self._snapshot)
+
+    def _build_data(self, snapshot: _SourceSnapshot) -> CalendarData:
+        """Assemble le calendrier: evenements de sources et evenements manuels.
+
+        Args:
+            snapshot: Resultat du dernier telechargement des sources.
+
+        Returns:
+            Donnees consolidees du calendrier.
+
+        Raises:
+            UpdateFailed: Si le calendrier serait totalement vide parce que
+                toutes les sources ont echoue.
+        """
+        source_events = snapshot.events
+        errors = snapshot.errors
+        sources_total = snapshot.sources_total
+        manual_rules = self.manual_events
 
         # Les occurrences manuelles sont calculees a partir des evenements des
         # sources, car le filtrage des jours de fermeture a besoin des conges
@@ -638,7 +728,7 @@ class SchoolCalendarCoordinator(DataUpdateCoordinator[CalendarData]):
         # Echec seulement si le calendrier serait totalement vide. Des sources
         # en echec n'empechent pas d'afficher des evenements manuels; l'erreur
         # reste visible via l'attribut source_errors du capteur d'etat.
-        if sources and len(errors) == len(sources) and not manual_events:
+        if sources_total and len(errors) == sources_total and not manual_events:
             raise UpdateFailed(
                 "Aucune source n'a pu etre traitee: "
                 + "; ".join(f"{name}: {msg}" for name, msg in errors.items())
@@ -647,7 +737,7 @@ class SchoolCalendarCoordinator(DataUpdateCoordinator[CalendarData]):
         data = CalendarData(
             events=source_events + manual_events,
             source_errors=errors,
-            sources_total=len(sources),
+            sources_total=sources_total,
         )
 
         _LOGGER.debug(
