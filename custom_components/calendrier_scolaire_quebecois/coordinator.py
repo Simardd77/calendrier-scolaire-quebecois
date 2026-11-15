@@ -84,6 +84,21 @@ def event_bounds(event: SchoolEvent) -> tuple[datetime, datetime]:
     return event.start, event.end  # type: ignore[return-value]
 
 
+@dataclass(frozen=True, slots=True)
+class SourceDocuments:
+    """Documents dont une source de type site scolaire a tire ses evenements.
+
+    Attributes:
+        urls: Adresses des documents retenus, dans l'ordre de decouverte.
+        page_text_fallback: Vrai quand la page ne menait a aucun document et
+            que son texte a ete analyse directement. Les evenements viennent
+            alors d'un texte libre, ce qui est le cas le moins fiable.
+    """
+
+    urls: tuple[str, ...] = ()
+    page_text_fallback: bool = False
+
+
 @dataclass(slots=True)
 class CalendarData:
     """Donnees produites par un cycle de mise a jour.
@@ -92,11 +107,14 @@ class CalendarData:
         events: Evenements dedoublonnes et tries.
         source_errors: Message d'erreur par nom de source en echec.
         sources_total: Nombre de sources configurees.
+        documents: Documents retenus par identifiant de source. Seules les
+            sources de type site scolaire y figurent.
     """
 
     events: list[SchoolEvent] = field(default_factory=list)
     source_errors: dict[str, str] = field(default_factory=dict)
     sources_total: int = 0
+    documents: dict[str, SourceDocuments] = field(default_factory=dict)
 
     @property
     def sources_ok(self) -> int:
@@ -506,6 +524,7 @@ class _SourceSnapshot:
     events: list[SchoolEvent]
     errors: dict[str, str]
     sources_total: int
+    documents: dict[str, SourceDocuments] = field(default_factory=dict)
 
 
 class SchoolCalendarCoordinator(DataUpdateCoordinator[CalendarData]):
@@ -532,6 +551,8 @@ class SchoolCalendarCoordinator(DataUpdateCoordinator[CalendarData]):
             ),
         )
         self._snapshot: _SourceSnapshot | None = None
+        # Documents retenus pendant le cycle en cours, par identifiant de source.
+        self._documents: dict[str, SourceDocuments] = {}
         self._settings = self._settings_of(entry)
 
     @staticmethod
@@ -673,6 +694,7 @@ class SchoolCalendarCoordinator(DataUpdateCoordinator[CalendarData]):
 
         events: list[SchoolEvent] = []
         errors: dict[str, str] = {}
+        self._documents = {}
 
         if sources:
             results = await asyncio.gather(
@@ -692,7 +714,10 @@ class SchoolCalendarCoordinator(DataUpdateCoordinator[CalendarData]):
         # decoupage etant ce qui produit les journees isolees.
         source_events = singularize_one_day_summaries(exclude_weekends(events))
         self._snapshot = _SourceSnapshot(
-            events=source_events, errors=errors, sources_total=len(sources)
+            events=source_events,
+            errors=errors,
+            sources_total=len(sources),
+            documents=dict(self._documents),
         )
         return self._build_data(self._snapshot)
 
@@ -738,6 +763,7 @@ class SchoolCalendarCoordinator(DataUpdateCoordinator[CalendarData]):
             events=source_events + manual_events,
             source_errors=errors,
             sources_total=sources_total,
+            documents=snapshot.documents,
         )
 
         _LOGGER.debug(
@@ -798,6 +824,14 @@ class SchoolCalendarCoordinator(DataUpdateCoordinator[CalendarData]):
                 "Aucun document de calendrier trouve sur %s, analyse de la page",
                 source.url,
             )
+            # Le texte d'une page est le cas le moins fiable: il est signale a
+            # chaque cycle plutot que d'etre relegue au niveau debug.
+            _LOGGER.warning(
+                "Aucun document de calendrier sur %s: le texte de la page est "
+                "analyse directement, les evenements peuvent etre inexacts",
+                source.url,
+            )
+            self._documents[source.source_id] = SourceDocuments(page_text_fallback=True)
             return await self.hass.async_add_executor_job(
                 _events_from_text,
                 html_to_text(html),
@@ -808,6 +842,7 @@ class SchoolCalendarCoordinator(DataUpdateCoordinator[CalendarData]):
         _LOGGER.debug("%d document(s) decouvert(s) sur %s", len(links), source.url)
 
         events: list[SchoolEvent] = []
+        retained: list[str] = []
 
         for link in links:
             try:
@@ -825,7 +860,11 @@ class SchoolCalendarCoordinator(DataUpdateCoordinator[CalendarData]):
                 _LOGGER.debug("Document ecarte, aucun marqueur de calendrier: %s", link)
                 continue
 
+            _LOGGER.info("Document retenu pour '%s': %s", source.name, link)
+            retained.append(link)
             events.extend(found)
+
+        self._documents[source.source_id] = SourceDocuments(urls=tuple(retained))
 
         return events
 
