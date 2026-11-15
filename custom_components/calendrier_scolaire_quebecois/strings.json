@@ -21,7 +21,7 @@
     "error": {
       "cannot_connect": "L'URL fournie est inaccessible.",
       "invalid_url": "L'adresse doit être une URL HTTP ou HTTPS valide.",
-      "not_a_calendar": "Ce document ne semble pas être un calendrier scolaire : aucun congé, journée pédagogique, relâche ni rentrée n'y a été trouvé. Vérifiez l'adresse. S'il s'agit d'un PDF numérisé, activez l'OCR.",
+      "not_a_calendar": "Ce document ne semble pas être un calendrier scolaire : aucun congé ni aucune journée pédagogique n'y a été trouvé, ou trop peu parmi les dates relevées. Vérifiez l'adresse. S'il s'agit d'un PDF numérisé, activez l'OCR.",
       "unknown": "Une erreur inattendue s'est produite."
     },
     "abort": {
@@ -127,7 +127,7 @@
     "error": {
       "cannot_connect": "L'URL fournie est inaccessible.",
       "invalid_url": "L'adresse doit être une URL HTTP ou HTTPS valide.",
-      "not_a_calendar": "Ce document ne semble pas être un calendrier scolaire : aucun congé, journée pédagogique, relâche ni rentrée n'y a été trouvé. Vérifiez l'adresse. S'il s'agit d'un PDF numérisé, activez l'OCR.",
+      "not_a_calendar": "Ce document ne semble pas être un calendrier scolaire : aucun congé ni aucune journée pédagogique n'y a été trouvé, ou trop peu parmi les dates relevées. Vérifiez l'adresse. S'il s'agit d'un PDF numérisé, activez l'OCR.",
       "already_exists": "Cette source est déjà configurée.",
       "unknown": "Une erreur inattendue s'est produite.",
       "manual_event_summary_required": "Le titre est obligatoire.",

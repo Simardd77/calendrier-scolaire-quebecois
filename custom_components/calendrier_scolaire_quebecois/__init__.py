@@ -409,9 +409,10 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
         if not is_calendar_like(probed):
             raise ServiceValidationError(
-                f"'{url}' ne semble pas etre un calendrier scolaire: aucun conge, "
-                "journee pedagogique, relache ni rentree n'y a ete trouve. Si "
-                "c'est un PDF numerise, activez l'OCR avant de reessayer."
+                f"'{url}' ne semble pas etre un calendrier scolaire: aucun conge ni "
+                "aucune journee pedagogique n'y a ete trouve, ou trop peu parmi "
+                "les dates relevees. Si c'est un PDF numerise, activez l'OCR "
+                "avant de reessayer."
             )
 
         sources.append(

@@ -21,7 +21,7 @@
     "error": {
       "cannot_connect": "The provided URL is unreachable.",
       "invalid_url": "The address must be a valid HTTP or HTTPS URL.",
-      "not_a_calendar": "This document does not look like a school calendar: no holiday, pedagogical day, spring break or term start was found. Check the address. If it is a scanned PDF, enable OCR.",
+      "not_a_calendar": "This document does not look like a school calendar: no holiday or pedagogical day was found, or too few among the dates read. Check the address. If it is a scanned PDF, enable OCR.",
       "unknown": "An unexpected error occurred."
     },
     "abort": {
@@ -127,7 +127,7 @@
     "error": {
       "cannot_connect": "The provided URL is unreachable.",
       "invalid_url": "The address must be a valid HTTP or HTTPS URL.",
-      "not_a_calendar": "This document does not look like a school calendar: no holiday, pedagogical day, spring break or term start was found. Check the address. If it is a scanned PDF, enable OCR.",
+      "not_a_calendar": "This document does not look like a school calendar: no holiday or pedagogical day was found, or too few among the dates read. Check the address. If it is a scanned PDF, enable OCR.",
       "already_exists": "This source is already configured.",
       "unknown": "An unexpected error occurred.",
       "manual_event_summary_required": "The title is required.",
