@@ -41,6 +41,10 @@ accompagnée de capteurs prêts pour l'automatisation.
   scolaires québécois, où le sens de chaque journée est encodé par une forme ou
   une couleur autour du chiffre
 - Lecture des fichiers iCalendar
+- **Événements manuels**, ponctuels ou répétés (« éducation physique les
+  mardis et jeudis, de 10 h à 11 h »), qui s'effacent d'eux-mêmes les jours de
+  fermeture du calendrier officiel. Ajout, modification et suppression depuis
+  les options, la vue des calendriers ou des services
 - Exploration d'une page d'établissement pour y trouver les documents de
   calendrier — **expérimental**, voir [Limites connues](#limites-connues)
 - Année implicite déduite de l'année scolaire annoncée dans le document
@@ -53,6 +57,8 @@ accompagnée de capteurs prêts pour l'automatisation.
   5 janvier » ne prétend pas que les samedis en font partie
 - Refus d'une source qui n'est pas un calendrier scolaire, plutôt que de
   remplir le calendrier de fausses dates
+- Pour un site d'établissement, trace des documents réellement utilisés
+  (attribut `documents` du capteur d'état)
 - OCR facultatif pour les PDF numérisés
 - **Publication du calendrier en flux iCalendar**, pour s'y abonner depuis
   l'application Calendrier d'un iPhone, Google Agenda ou Outlook
@@ -60,7 +66,8 @@ accompagnée de capteurs prêts pour l'automatisation.
 ## Prérequis
 
 - Home Assistant **2026.1.0** ou plus récent
-- [HACS](https://hacs.xyz) pour l'installation recommandée
+- Pour l'installation recommandée : le **Marketplace** de Home Assistant
+  (2026.11 ou plus récent) ou [HACS](https://hacs.xyz) (versions antérieures)
 
 Les dépendances Python (`pdfplumber`, `icalendar`) sont installées
 automatiquement par Home Assistant.
@@ -79,6 +86,7 @@ d'installation.
 | Fichiers iCalendar | oui | oui | oui |
 | Exploration d'un site d'établissement | expérimental | expérimental | expérimental |
 | Publication du flux iCalendar | oui | oui | oui |
+| Événements manuels | oui | oui | oui |
 | OCR des PDF numérisés | non | non | oui, si binaires installés |
 
 L'OCR est la seule fonctionnalité indisponible sur Home Assistant OS et
@@ -92,11 +100,34 @@ structure du fichier. Elle n'a donc jamais besoin d'OCR.
 
 ## Installation
 
-### Via HACS
+### Via le Marketplace (Home Assistant 2026.11 ou plus récent)
+
+Le Marketplace est intégré à Home Assistant : HACS y a été absorbé, et il n'y
+a rien à télécharger.
+
+1. **Paramètres → Marketplace**
+2. Cherchez « Calendrier Scolaire Québécois ». S'il n'apparaît pas dans le
+   catalogue, choisissez **Ajouter depuis un lien** (en haut à droite) et
+   saisissez `Simardd77/calendrier-scolaire-quebecois`. Cette option demande de
+   connecter un compte GitHub, en lecture seule
+3. Installez. L'assistant de configuration s'ouvre sans redémarrage. Une mise
+   à jour, elle, demande un redémarrage
+
+Les mises à jour apparaissent dans **Paramètres → Mises à jour**.
+
+**Versions bêta.** Le Marketplace ne propose que les versions stables. Pour
+recevoir aussi les pré-versions (`1.1.1-beta.1`, etc.), ouvrez **Paramètres →
+Appareils et services → Marketplace**, choisissez l'appareil de ce dépôt,
+activez l'entité **Pre-release** (désactivée par défaut), puis son
+interrupteur.
+
+### Via HACS (Home Assistant antérieur à 2026.11)
 
 [![Ouvrir dans HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Simardd77&category=integration&repository=calendrier-scolaire-quebecois)
 
-Redémarrez Home Assistant après l'installation.
+Redémarrez Home Assistant après l'installation. Une installation HACS est
+migrée d'elle-même vers le Marketplace au passage à la version 2026.11 : les
+intégrations installées et leurs mises à jour sont conservées.
 
 ### Installation manuelle
 
@@ -177,9 +208,12 @@ distingue pas la provenance des fermetures ; seul l'attribut `source` de chaque
 ### Une source doit être un vrai calendrier
 
 L'URL saisie n'est pas seulement testée pour sa joignabilité : le document est
-téléchargé et analysé avant d'être accepté. S'il ne contient aucun congé,
-journée pédagogique, semaine de relâche ni rentrée, il est refusé avec le
-message « Ce document ne semble pas être un calendrier scolaire ».
+téléchargé et analysé avant d'être accepté. S'il ne
+contient aucun marqueur reconnu (congé, journée pédagogique, rentrée, fin des
+classes, examen ou rencontre), il est refusé avec le message « Ce document ne
+semble pas être un calendrier scolaire ». **Un seul** marqueur suffit à
+l'accepter : la vérification écarte un règlement ou un rapport annuel, pas une
+page d'actualités qui mentionnerait une rentrée.
 
 La raison est qu'un document quelconque contient presque toujours des dates. Un
 règlement, un procès-verbal ou un rapport annuel produiraient des dizaines de
@@ -212,9 +246,14 @@ pas de son extension : une URL sans extension fonctionne.
 > beaucoup de la façon dont l'établissement construit sa page, et les essais en
 > cours montrent que la découverte échoue ou reste incomplète sur une partie des
 > sites. Pour une configuration dont vous dépendez, préférez `direct_url` sur
-> l'adresse du PDF : c'est le chemin éprouvé. Si la recherche ne trouve rien
-> l'adresse du document est visible dans les journaux en mode `debug`
-> et [une issue](https://github.com/Simardd77/calendrier-scolaire-quebecois/issues)
+> l'adresse du PDF : c'est le chemin éprouvé. Pour savoir ce qui a été retenu,
+> lisez l'attribut `documents` de la source dans le capteur d'état, ou les
+> journaux (niveau `info`, « Document retenu »). Si la page ne mène à aucun
+> document, son texte est analysé tel quel : l'attribut `page_text_fallback`
+> passe à `true` et un avertissement est journalisé, car les événements
+> obtenus ainsi sont peu fiables.
+>
+> Dans tous les cas, [une issue](https://github.com/Simardd77/calendrier-scolaire-quebecois/issues)
 > avec l'URL de la page aide à corriger le tir.
 
 ## Entités
@@ -261,7 +300,7 @@ last_day: "2026-08-28"     # ici, end moins un jour
 all_day: true
 category: pedagogical_day
 closes_school: true
-source: "CSS des Patriotes"
+source: "CSS des Patriotes"   # "manuel" pour un événement manuel
 ```
 
 Distinction à faire: `end` est **exclusif**, comme dans le format
@@ -289,7 +328,7 @@ Valeurs possibles de `category` :
 | Entité | Description |
 |---|---|
 | `binary_sensor.<nom_calendrier>_ecole_ouverte` | Faux la fin de semaine, hors de l'année scolaire, pendant les congés et les journées pédagogiques |
-| `binary_sensor.<nom_calendrier>_evenement_aujourd_hui` | Vrai si un événement couvre aujourd'hui |
+| `binary_sensor.<nom_calendrier>_evenement_aujourd_hui` | Vrai si un événement couvre aujourd'hui, **les événements manuels compris** : un cours manuel du mardi le fait passer à `on` chaque mardi |
 | `binary_sensor.<nom_calendrier>_conge_aujourd_hui` | Vrai pendant un congé ou des vacances |
 
 ### Attributs des autres entités
@@ -307,7 +346,7 @@ développement → États**, en sélectionnant l'entité.
 | | `events_count` | Nombre d'événements chargés |
 | | `errors` | Message d'erreur par nom de source |
 | | `ocr_enabled` | Reflet du réglage OCR |
-| | `sources` | Liste de `id`, `name`, `url`, `type` — la clé `id` est le `source_id` attendu par `remove_source` |
+| | `sources` | Liste de `id`, `name`, `url`, `type`, `documents`, `page_text_fallback`. La clé `id` est le `source_id` attendu par `remove_source`. `documents` liste les URL des documents réellement retenus pour une source `school_website`, dans l'ordre de découverte, et reste vide pour les autres types. `page_text_fallback` vaut `true` quand la page n'a mené à aucun document et que son texte a été analysé directement |
 | | `manual_events` | Liste de `id`, `summary` des événements manuels — la clé `id` est l'`event_id` attendu par `remove_manual_event` |
 | `École ouverte` | `term_start`, `term_end` | Début et fin de l'année scolaire en cours, déduits du document, `null` s'il ne les annonce pas. Plusieurs années chargées ne donnent pas leur enveloppe |
 | | `reason` | `weekend`, `outside_term`, `holiday`, `pedagogical_day`, ou `null` si l'école est ouverte |
@@ -362,7 +401,10 @@ Rien n'est à activer : un secret est attribué à votre calendrier dès sa
 création, ce qui rend le flux disponible immédiatement. Il ne reste qu'à en
 relever l'adresse.
 
-### Récupérer l'adresse du fluxenda externe**
+### Récupérer l'adresse du flux
+
+**Paramètres → Appareils et services → Calendrier Scolaire Québécois →
+Configurer → Publier vers un agenda externe**.
 
 L'écran affiche l'adresse complète, de la forme :
 
@@ -484,8 +526,10 @@ homeassistant:
 ```
 
 Lorsque plusieurs calendriers sont configurés, ajoutez `config_entry_id` pour
-désigner celui visé. Les services `add_source`, `remove_source` et `parse_pdf`
-retournent sinon une erreur explicite.
+désigner celui visé. Les services `add_source`, `remove_source`, `parse_pdf`,
+`add_manual_event` et `remove_manual_event` retournent sinon une erreur
+explicite. `refresh_calendar` sans `config_entry_id` actualise tous les
+calendriers.
 
 ### Ajouter un événement depuis la vue des calendriers
 
@@ -839,6 +883,14 @@ Ouvrez l'adresse du flux dans un navigateur : le code renvoyé indique la cause.
   extension passe inaperçu. Les pages construites en JavaScript ne sont pas
   interprétées, seul le HTML renvoyé par le serveur est lu. Le type `direct_url`
   reste la voie fiable.
+- Une source `school_website` **fusionne tous les documents** retenus sur la
+  page, jusqu'à 10, sans les départager. Une page qui expose les calendriers
+  de deux années ou de plusieurs secteurs (jeunes, adultes, formation
+  professionnelle) les mélange dans une seule entité. Pour ce cas, ajoutez
+  chaque PDF voulu comme source `direct_url`.
+- Le formulaire valide une source `school_website` sur le **premier** document
+  qui ressemble à un calendrier, alors que le rafraîchissement les retient
+  tous : le document validé n'est pas forcément le seul utilisé.
 - Les règles de récurrence iCalendar (`RRULE`) ne sont pas développées : seule
   la première occurrence est retenue, et un avertissement est journalisé.
 - L'analyse en grille exige que le document imprime sa légende. Sans légende
@@ -918,7 +970,7 @@ catégories dans `models.py`. Un mot-clé manquant s'ajoute au tuple de sa
 catégorie, avec un test dans `tests/test_events.py`.
 
 Le dossier `tools/` contient les outils de mise au point. Rien n'y est livré à
-l'utilisateur : HACS n'installe que `custom_components/`.
+l'utilisateur : le Marketplace et HACS n'installent que `custom_components/`.
 
 | Script | Rôle |
 |---|---|
@@ -970,6 +1022,33 @@ feat: support Altitude calendar symbols                 ← non, anglais
 
 Deux types de commits sont exclus du changelog, donc leur langue importe peu :
 les fusions `Merge pull request #N` et le `chore: bump version to X`.
+
+### Branches, bêtas et releases
+
+Une seule branche longue, `main`. Les branches de travail en partent et y
+reviennent par pull request. `main` est protégée : pull request obligatoire,
+force push et suppression interdits, contrôles `Validate`, `HACS Validation` et
+`Hassfest` requis.
+
+| Événement | Résultat |
+|---|---|
+| Pull request vers `main`, depuis `feat/…` ou `fix/…` | Validation, puis pré-version `X.Y.Z-beta.N`, à l'ouverture et à chaque push dans la PR. Construite sur le dernier commit de la branche |
+| Pull request depuis une autre branche (`ci/…`, `docs/…`, `chore/…`) | Validation seule |
+| Fusion dans `main` | Validation, puis pré-version `X.Y.Z-beta.N` du contenu exact de `main` |
+| Lancement manuel de **CI** sur `main` (Actions → CI → Run workflow) | Validation, puis release stable `vX.Y.Z`, avec la version de `manifest.json` |
+
+Les pull requests venant d'un fork ne publient rien. Le numéro `N` est partagé
+par toutes les bêtas d'une même version.
+
+**Incrémenter `version` dans `manifest.json` juste après une stable**, dans une
+PR vers `main`. Une pré-version se classe *sous* sa version (`1.1.1-beta.1` <
+`1.1.1`) et au-dessus de la stable précédente (`1.1.1-beta.1` > `1.1.0`) : le
+numéro de base annonce la stable à venir. Sans cet incrément, la publication
+d'une bêta échoue en signalant que la stable existe déjà.
+
+Chaque release contient deux archives : `calendrier_scolaire_quebecois.zip`,
+que le Marketplace et HACS téléchargent, et
+`calendrier-scolaire-quebecois-<version>.zip` pour l'installation manuelle.
 
 ## Support
 
