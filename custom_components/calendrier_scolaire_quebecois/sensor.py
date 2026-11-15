@@ -13,7 +13,11 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .coordinator import SchoolCalendarConfigEntry, SchoolCalendarCoordinator
+from .coordinator import (
+    SchoolCalendarConfigEntry,
+    SchoolCalendarCoordinator,
+    SourceDocuments,
+)
 from .entity import SchoolCalendarBaseEntity
 
 # Horizon du capteur d'evenements a venir.
@@ -47,6 +51,23 @@ async def async_setup_entry(
             StatusSensor(coordinator),
         ]
     )
+
+
+def _documents_attributes(documents: SourceDocuments | None) -> dict[str, object]:
+    """Attributs de document d'une source dans le capteur d'etat.
+
+    Args:
+        documents: Documents retenus au dernier cycle, ou None pour une source
+            qui n'en a pas (lien direct, source en echec).
+
+    Returns:
+        Les cles ``documents`` et ``page_text_fallback``, toujours presentes.
+    """
+    documents = documents or SourceDocuments()
+    return {
+        "documents": list(documents.urls),
+        "page_text_fallback": documents.page_text_fallback,
+    }
 
 
 class TotalEventsSensor(SchoolCalendarBaseEntity, SensorEntity):
@@ -206,12 +227,17 @@ class StatusSensor(SchoolCalendarBaseEntity, SensorEntity):
             "ocr_enabled": self.coordinator.enable_ocr,
             # L'identifiant est expose ici parce que c'est le seul endroit ou
             # l'utilisateur peut le lire: le service remove_source l'attend.
+            # Pour un site scolaire, "documents" donne les fichiers dont les
+            # evenements ont reellement ete tires: "url" n'est que la page.
+            # "page_text_fallback" signale une page sans document, analysee
+            # comme texte libre.
             "sources": [
                 {
                     "id": source.source_id,
                     "name": source.name,
                     "url": source.url,
                     "type": source.source_type,
+                    **_documents_attributes(data.documents.get(source.source_id)),
                 }
                 for source in self.coordinator.sources
             ],

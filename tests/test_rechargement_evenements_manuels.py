@@ -265,3 +265,8 @@ async def test_indicateur_de_changement_limite_aux_evenements_manuels(
         entry, options={**entry.options, CONF_SOURCES: [SOURCE]}
     )
     assert not coordinateur.only_manual_events_changed
+
+    # Laisser le rechargement declenche par la mise a jour se terminer avant la
+    # fin du test: sinon il s'acheve pendant l'arret de hass et laisse un
+    # minuteur de l'entite calendrier derriere lui.
+    await hass.async_block_till_done()
