@@ -1032,13 +1032,12 @@ force push et suppression interdits, contrôles `Validate`, `HACS Validation` et
 
 | Événement | Résultat |
 |---|---|
-| Pull request vers `main`, depuis `feat/…` ou `fix/…` | Validation, puis pré-version `X.Y.Z-beta.N`, à l'ouverture et à chaque push dans la PR. Construite sur le dernier commit de la branche |
-| Pull request depuis une autre branche (`ci/…`, `docs/…`, `chore/…`) | Validation seule |
+| Pull request vers `main` | Validation seule, quelle que soit la branche |
 | Fusion dans `main` | Validation, puis pré-version `X.Y.Z-beta.N` du contenu exact de `main` |
 | Lancement manuel de **CI** sur `main` (Actions → CI → Run workflow) | Validation, puis release stable `vX.Y.Z`, avec la version de `manifest.json` |
 
-Les pull requests venant d'un fork ne publient rien. Le numéro `N` est partagé
-par toutes les bêtas d'une même version.
+Une release n'est créée qu'à la fusion dans `main`, jamais à l'ouverture d'une
+pull request. Le numéro `N` est partagé par toutes les bêtas d'une même version.
 
 **Incrémenter `version` dans `manifest.json` juste après une stable**, dans une
 PR vers `main`. Une pré-version se classe *sous* sa version (`1.1.1-beta.1` <
