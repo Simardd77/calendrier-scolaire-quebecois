@@ -100,14 +100,20 @@ structure du fichier. Elle n'a donc jamais besoin d'OCR.
 
 ## Installation
 
+Le bouton ci-dessous ouvre la page du dépôt, dans le Marketplace sur Home
+Assistant 2026.11 ou plus récent, dans HACS sur une version antérieure. Les
+boutons conçus pour HACS ont été conservés par le Marketplace.
+
+[![Ouvrir dans HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Simardd77&category=integration&repository=calendrier-scolaire-quebecois)
+
 ### Via le Marketplace (Home Assistant 2026.11 ou plus récent)
 
 Le Marketplace est intégré à Home Assistant : HACS y a été absorbé, et il n'y
 a rien à télécharger.
 
 1. **Paramètres → Marketplace**
-2. Cherchez « Calendrier Scolaire Québécois ». S'il n'apparaît pas dans le
-   catalogue, choisissez **Ajouter depuis un lien** (en haut à droite) et
+2. Cherchez « Calendrier Scolaire Québécois », ou utilisez le bouton
+   ci-dessus. S'il n'apparaît pas dans le catalogue, choisissez **Ajouter depuis un lien** (en haut à droite) et
    saisissez `Simardd77/calendrier-scolaire-quebecois`. Cette option demande de
    connecter un compte GitHub, en lecture seule
 3. Installez. L'assistant de configuration s'ouvre sans redémarrage. Une mise
@@ -123,11 +129,10 @@ interrupteur.
 
 ### Via HACS (Home Assistant antérieur à 2026.11)
 
-[![Ouvrir dans HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Simardd77&category=integration&repository=calendrier-scolaire-quebecois)
-
-Redémarrez Home Assistant après l'installation. Une installation HACS est
-migrée d'elle-même vers le Marketplace au passage à la version 2026.11 : les
-intégrations installées et leurs mises à jour sont conservées.
+Même bouton que ci-dessus. Redémarrez Home Assistant après l'installation. Une
+installation HACS est migrée d'elle-même vers le Marketplace au passage à la
+version 2026.11 : les intégrations installées et leurs mises à jour sont
+conservées.
 
 ### Installation manuelle
 
