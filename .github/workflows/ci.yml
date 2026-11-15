@@ -6,7 +6,7 @@ name: CI
 # Une seule branche longue, main. Les branches de travail en partent et y
 # reviennent par pull request.
 #
-#   push sur main            -> validation seule
+#   push sur main (fusion)   -> validation, puis prerelease "<manifest>-beta.N"
 #   PR vers main, depuis feat/** ou fix/**
 #                            -> validation, puis prerelease "<manifest>-beta.N"
 #   autre PR vers main       -> validation seule
@@ -18,9 +18,14 @@ name: CI
 # de la fusion. Les PR venant d'un fork ne publient rien: leur jeton n'a pas le
 # droit d'ecrire.
 #
-# Le numero N est partage par toutes les PR: la beta la plus recente est celle
-# proposee aux testeurs, quelle que soit sa PR d'origine. La branche source est
-# indiquee dans les notes de la release.
+# La fusion dans main publie aussi une beta, quelle que soit la branche de la
+# PR. C'est la seule beta qui correspond exactement au contenu de main, PR
+# combinees comprises: c'est celle a tester avant de lancer la stable. Une
+# fonctionnalite passe donc par deux betas, une a la PR et une a la fusion.
+#
+# Le numero N est partage par toutes les betas: la plus recente est celle
+# proposee aux testeurs. La branche source est indiquee dans les notes de la
+# release.
 #
 # Lancer la stable: onglet Actions > CI > Run workflow, branche main. Elle
 # publie la version inscrite dans manifest.json, sur le dernier commit de main.
@@ -118,10 +123,12 @@ jobs:
     # La publication attend les trois controles. C'est tout l'objet de la
     # consolidation dans ce fichier.
     needs: [validate, hacs, hassfest]
-    # Seuls publient: le lancement manuel (stable) et une PR du depot lui-meme
-    # dont la branche commence par feat/ ou fix/ (beta).
+    # Seuls publient: le lancement manuel (stable), un push sur main (beta) et
+    # une PR du depot lui-meme dont la branche commence par feat/ ou fix/
+    # (beta).
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
       (github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       (startsWith(github.head_ref, 'feat/') || startsWith(github.head_ref, 'fix/')))
