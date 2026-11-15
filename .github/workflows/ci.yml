@@ -6,18 +6,26 @@ name: CI
 # Une seule branche longue, main. Les branches de travail en partent et y
 # reviennent par pull request.
 #
-#   pull request vers main   -> validation seule
-#   push sur main (fusion)   -> validation, puis prerelease "<manifest>-beta.N"
-#   lancement manuel (main)  -> validation, puis release stable "<manifest>"
+#   pull request vers main        -> validation seule
+#   fusion d'une PR feat/ ou fix/ -> validation, puis prerelease
+#                                    "<manifest>-beta.N"
+#   fusion de toute autre PR      -> validation seule (ci/, docs/, chore/...)
+#   lancement manuel (main)       -> validation, puis release stable
+#                                    "<manifest>"
 #
 # Une release ne se cree qu'a la fusion dans main, jamais a l'ouverture d'une
-# pull request. Une beta de PR contenait le meme code que celle de la fusion,
-# sans rien de plus: elle doublait les releases sans rien apprendre aux
-# testeurs. La beta de la fusion est celle du contenu exact de main, PR
-# combinees comprises: c'est celle a tester avant de lancer la stable.
+# pull request: une beta de PR contenait le meme code que celle de la fusion.
+# Elle ne se cree que pour une PR venant de feat/ ou fix/, c'est-a-dire un
+# changement visible pour l'utilisateur. Un changement de CI, de documentation
+# ou de maintenance ne donne pas de beta a installer.
 #
-# Le numero N est partage par toutes les betas d'une meme version: la plus
-# recente est celle proposee aux testeurs.
+# Un push sur main ne porte pas le nom de la branche fusionnee. Le job "scope"
+# le retrouve en demandant a GitHub la ou les PR associees au commit.
+#
+# La beta de la fusion est celle du contenu exact de main, PR combinees
+# comprises: c'est celle a tester avant de lancer la stable. Le numero N est
+# partage par toutes les betas d'une meme version: la plus recente est celle
+# proposee aux testeurs.
 #
 # Lancer la stable: onglet Actions > CI > Run workflow, branche main. Elle
 # publie la version inscrite dans manifest.json, sur le dernier commit de main.
@@ -109,15 +117,55 @@ jobs:
       - name: Hassfest validation
         uses: home-assistant/actions/hassfest@master
 
+  # Decide si le push sur main doit publier une beta. Une beta n'est utile que
+  # pour un changement visible pour l'utilisateur: la PR fusionnee doit venir
+  # d'une branche feat/ ou fix/.
+  scope:
+    name: Release scope
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      publish: ${{ steps.scope.outputs.publish }}
+    steps:
+      - name: Decide whether to publish
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "${EVENT}" == workflow_dispatch ]]; then
+            echo "Lancement manuel: la stable est publiee."
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Les noms de branche sont fournis par le contributeur: ils restent
+          # dans des variables et ne sont jamais interpoles dans le script.
+          BRANCHES=$(gh api "repos/${REPO}/commits/${SHA}/pulls" \
+                     --jq '.[].head.ref')
+          echo "Branche(s) fusionnee(s): ${BRANCHES:-aucune}"
+          if printf '%s\n' "${BRANCHES}" | grep -Eq '^(feat|fix)/'; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Ni feat/ ni fix/: aucune beta."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
     # La publication attend les trois controles. C'est tout l'objet de la
     # consolidation dans ce fichier.
-    needs: [validate, hacs, hassfest]
-    # Une pull request ne publie rien: seuls la fusion (push sur main) et le
-    # lancement manuel le font.
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: [validate, hacs, hassfest, scope]
+    # Une pull request ne publie rien. Un push sur main publie seulement si
+    # la PR fusionnee venait de feat/ ou fix/ (job scope), et le lancement
+    # manuel publie toujours.
+    if: needs.scope.outputs.publish == 'true'
     permissions:
       contents: write
     # Une publication a la fois: deux fusions rapprochees ou une fusion et un
