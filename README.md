@@ -208,12 +208,19 @@ distingue pas la provenance des fermetures ; seul l'attribut `source` de chaque
 ### Une source doit être un vrai calendrier
 
 L'URL saisie n'est pas seulement testée pour sa joignabilité : le document est
-téléchargé et analysé avant d'être accepté. S'il ne
-contient aucun marqueur reconnu (congé, journée pédagogique, rentrée, fin des
-classes, examen ou rencontre), il est refusé avec le message « Ce document ne
-semble pas être un calendrier scolaire ». **Un seul** marqueur suffit à
-l'accepter : la vérification écarte un règlement ou un rapport annuel, pas une
-page d'actualités qui mentionnerait une rentrée.
+téléchargé et analysé avant d'être accepté. Deux conditions sont requises :
+
+- au moins une **fermeture** : un congé, une journée pédagogique ou une semaine
+  de relâche. Une rentrée, un examen ou une rencontre seuls ne suffisent pas,
+  car une page d'actualités en mentionne souvent ;
+- au moins **40 %** des dates relevées doivent porter une catégorie reconnue.
+  Une seule mention de « journée pédagogique » noyée dans quinze annonces ne
+  valide donc pas la page.
+
+Sinon, le document est refusé avec le message « Ce document ne semble pas être
+un calendrier scolaire ». Les deux calendriers 2026-2027 fournis dans `tools/`
+sont catégorisés à 100 %, alors que la page d'accueil d'un centre de services,
+lue comme texte libre lors du diagnostic d'origine, l'était à 18 %.
 
 La raison est qu'un document quelconque contient presque toujours des dates. Un
 règlement, un procès-verbal ou un rapport annuel produiraient des dizaines de
@@ -858,7 +865,7 @@ logger:
 | Du texte est extrait mais aucun événement | Un avertissement le signale explicitement dans le journal. Le document n'utilise ni mots-clés reconnus ni grille avec légende |
 | Aucun texte extrait | Le PDF est une image : voir la section OCR |
 | Dates décalées | Le document utilise peut-être `mm/jj/aaaa` ; l'ordre `jj/mm/aaaa` est essayé en premier |
-| « Ce document ne semble pas être un calendrier scolaire » | Le document ne contient aucun marqueur reconnu. S'il est numérisé, activez l'OCR ; si l'URL est une page d'accueil, choisissez le type site d'établissement |
+| « Ce document ne semble pas être un calendrier scolaire » | Le document ne contient aucun congé ni aucune journée pédagogique, ou ils sont noyés dans trop de dates non classées. S'il est numérisé, activez l'OCR ; si l'URL est une page d'accueil, choisissez le type site d'établissement |
 | « L'URL fournie est inaccessible » | Le serveur ne répond pas dans le délai imparti, ou refuse la requête |
 
 ### Le flux iCalendar ne fonctionne pas

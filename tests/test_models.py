@@ -590,35 +590,72 @@ def test_is_calendar_like_refuse_les_evenements_non_types():
     assert is_calendar_like(evenements) is False
 
 
+def _evenement(categorie: EventCategory, jour: int = 10) -> SchoolEvent:
+    """Evenement d'une journee de septembre 2024, pour composer des lots."""
+    return SchoolEvent(
+        summary="Evenement",
+        start=date(2024, 9, jour),
+        end=date(2024, 9, jour + 1),
+        category=categorie,
+    )
+
+
+@pytest.mark.parametrize(
+    "categorie", [EventCategory.HOLIDAY, EventCategory.PEDAGOGICAL_DAY]
+)
+def test_is_calendar_like_accepte_une_fermeture(categorie):
+    """Un conge ou une journee pedagogique signe un calendrier scolaire."""
+    assert is_calendar_like([_evenement(categorie)]) is True
+
+
 @pytest.mark.parametrize(
     "categorie",
     [
-        EventCategory.HOLIDAY,
-        EventCategory.PEDAGOGICAL_DAY,
         EventCategory.TERM_START,
         EventCategory.TERM_END,
         EventCategory.EXAM,
         EventCategory.MEETING,
     ],
 )
-def test_is_calendar_like_accepte_un_seul_evenement_type(categorie):
-    """Un seul marqueur scolaire suffit a reconnaitre un calendrier."""
-    evenements = [
-        SchoolEvent(
-            summary="Bruit",
-            start=date(2024, 9, 10),
-            end=date(2024, 9, 11),
-            category=EventCategory.EVENT,
-        ),
-        SchoolEvent(
-            summary="Marqueur scolaire",
-            start=date(2024, 12, 23),
-            end=date(2024, 12, 24),
-            category=categorie,
-        ),
-    ]
+def test_is_calendar_like_refuse_un_lot_sans_fermeture(categorie):
+    """Une rentree, un examen ou une rencontre seuls ne font pas un calendrier.
 
-    assert is_calendar_like(evenements) is True
+    Une page d'actualites mentionne souvent l'un ou l'autre.
+    """
+    evenements = [_evenement(categorie, jour) for jour in range(1, 6)]
+    assert is_calendar_like(evenements) is False
+
+
+def test_is_calendar_like_refuse_une_fermeture_noyee_dans_du_bruit():
+    """Une mention de conge parmi quinze annonces ne valide pas la page."""
+    evenements = [_evenement(EventCategory.HOLIDAY)]
+    evenements += [_evenement(EventCategory.EVENT, jour) for jour in range(1, 16)]
+
+    assert is_calendar_like(evenements) is False
+
+
+def test_is_calendar_like_refuse_la_page_d_accueil_d_un_centre_de_services():
+    """Reproduit la page d'accueil qui avait ete acceptee a tort.
+
+    17 evenements dont deux fausses rentrees et une rencontre: 18 % de types,
+    sans aucune fermeture.
+    """
+    evenements = [_evenement(EventCategory.TERM_START, 1)] * 2
+    evenements += [_evenement(EventCategory.MEETING, 2)]
+    evenements += [_evenement(EventCategory.EVENT, jour) for jour in range(3, 17)]
+
+    assert is_calendar_like(evenements) is False
+
+
+def test_is_calendar_like_seuil_de_part_typee():
+    """Le seuil est inclus: 2 types sur 5 passent, 1 sur 3 ne passe pas."""
+    assez = [_evenement(EventCategory.HOLIDAY), _evenement(EventCategory.EXAM)]
+    assez += [_evenement(EventCategory.EVENT, jour) for jour in range(2, 5)]
+    pas_assez = [_evenement(EventCategory.HOLIDAY)]
+    pas_assez += [_evenement(EventCategory.EVENT, jour) for jour in range(2, 4)]
+
+    assert is_calendar_like(assez) is True
+    assert is_calendar_like(pas_assez) is False
 
 
 # --- fins de semaine --------------------------------------------------------

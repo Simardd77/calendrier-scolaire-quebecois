@@ -834,25 +834,51 @@ CALENDAR_SIGNATURE_CATEGORIES: frozenset[EventCategory] = frozenset(
 )
 
 
+#: Part minimale d'evenements types dans un lot pour y voir un calendrier.
+#:
+#: Mesuree sur des documents reels: les deux calendriers 2026-2027 des centres de
+#: services (CSSP, CSSDM) sont types a 100 %, alors que la page d'accueil d'un
+#: centre de services, analysee comme texte libre, l'est a 18 % (3 evenements
+#: sur 17, le reste etant du fil d'actualites; chiffres du diagnostic d'origine,
+#: la page ayant change depuis). Le seuil se place entre les deux,
+#: avec de la marge du cote des documents reels, dont certains melangent des
+#: lignes non classees a leurs conges. A relever si un vrai calendrier est
+#: refuse, et a rapprocher du message affiche a l'utilisateur.
+CALENDAR_MIN_TYPED_SHARE: float = 0.4
+
+
 def is_calendar_like(events: list[SchoolEvent]) -> bool:
     """Verifie qu'un lot d'evenements provient bien d'un calendrier scolaire.
 
     N'importe quel document contenant des dates produit des evenements: un
-    reglement, un proces-verbal ou un rapport annuel en fournissent tous. Mais
-    seul un calendrier scolaire emploie le vocabulaire du domaine (conge,
-    journee pedagogique, relache, rentree, bulletin), qui seul permet de
-    depasser la categorie de repli.
+    reglement, un proces-verbal, un rapport annuel ou un fil d'actualites en
+    fournissent tous. Seul un calendrier scolaire annonce des **fermetures**
+    (conge, journee pedagogique, relache) et les annonce en nombre: c'est ce
+    vocabulaire qui permet de depasser la categorie de repli.
 
-    Exiger au moins un evenement type distingue donc un veritable calendrier
-    d'un document quelconque qui se trouve contenir des dates.
+    Deux conditions, toutes deux requises:
+
+    - au moins une fermeture (``closes_school``). Une rentree ou une rencontre
+      seule ne fait pas un calendrier: une page d'actualites mentionne souvent
+      l'une et l'autre;
+    - au moins ``CALENDAR_MIN_TYPED_SHARE`` des evenements portent une
+      categorie reconnue. Sans cette part, une seule mention de « journee
+      pedagogique » noyee dans quinze annonces suffirait a tout valider.
 
     Args:
         events: Evenements extraits d'une source.
 
     Returns:
-        True si au moins un evenement porte une categorie scolaire reconnue.
+        True si le lot contient une fermeture et que les evenements types en
+        forment une part suffisante.
     """
-    return any(event.category in CALENDAR_SIGNATURE_CATEGORIES for event in events)
+    if not any(event.closes_school for event in events):
+        return False
+
+    typed = sum(
+        1 for event in events if event.category in CALENDAR_SIGNATURE_CATEGORIES
+    )
+    return typed / len(events) >= CALENDAR_MIN_TYPED_SHARE
 
 
 #: Indices de jour rendus par ``date.weekday()`` pour samedi et dimanche.
