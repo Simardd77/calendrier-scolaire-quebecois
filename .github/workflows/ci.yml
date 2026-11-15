@@ -364,8 +364,11 @@ jobs:
 
             ## Installation
 
-            Via HACS, rien à télécharger : HACS récupère
-            `calendrier_scolaire_quebecois.zip` automatiquement.
+            Via le Marketplace de Home Assistant (2026.11 ou plus récent) ou
+            HACS, rien à télécharger : ils récupèrent
+            `calendrier_scolaire_quebecois.zip` automatiquement. Une
+            pré-version (`-beta`) n'est proposée que si l'option
+            **Pre-release** du dépôt est activée.
 
             Pour une installation manuelle, prenez
             `calendrier-scolaire-quebecois-${{ steps.version.outputs.VERSION }}.zip`
